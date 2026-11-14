@@ -8,8 +8,8 @@
   <meta name="description" content="上传乐谱或音频，把旋律转换成 Nintendo Switch 2《时之笛》的按键谱。">
   <title>时之笛谱工坊</title>
   <link rel="icon" href="./assets/ocarina-nintendo.png" type="image/png">
-  <link rel="stylesheet" href="./styles.css?v=5">
-  <script type="module" src="./app.mjs?v=12"></script>
+  <link rel="stylesheet" href="./styles.css?v=13">
+  <script type="module" src="./app.mjs?v=13"></script>
 </head>
 <body id="top">
   <header class="site-header">
@@ -105,7 +105,7 @@
         <div class="panel-head">
           <span class="section-icon"><i class="icon" data-icon="list-music"></i></span>
           <div><h2 id="result-heading">按键谱</h2><p>试听旋律，照谱在游戏里演奏</p></div>
-          <button class="button text-button edit-button" id="edit-score" type="button"><i class="icon" data-icon="square-pen"></i>校对</button>
+          <button class="button text-button edit-button" id="edit-score" type="button" aria-pressed="false" aria-controls="score-edit-tools"><i class="icon" data-icon="square-pen"></i><span>校对</span></button>
         </div>
 
         <div class="score-sheet">
@@ -117,10 +117,32 @@
             <button class="button play-button" id="play" type="button" aria-describedby="playback-start"><i class="icon" data-icon="play"></i><span>试听</span></button>
           </div>
           <div class="bars" id="bars" aria-label="游戏按键序列"></div>
-          <div class="playback-position">
+          <div class="playback-position" id="playback-position">
             <span id="playback-start" role="status">点击谱上的音符选择试听起点</span>
             <button id="reset-playback-start" type="button" hidden>回到开头</button>
           </div>
+          <section class="score-edit-tools" id="score-edit-tools" aria-label="按键谱校对" hidden>
+            <div class="score-edit-toolbar">
+              <p id="note-selection" role="status">选择谱上的音符或休止符进行校对</p>
+              <div class="score-edit-actions">
+                <button class="button" id="undo-note" type="button" disabled>撤销</button>
+                <button class="button" id="score-original" type="button" hidden>对照原谱</button>
+                <button class="button" id="bulk-edit" type="button">文本编辑</button>
+              </div>
+            </div>
+            <form id="note-editor" hidden>
+              <div class="note-fields">
+                <label for="note-edit-pitch">原谱音高<select id="note-edit-pitch"></select></label>
+                <label for="note-edit-beats">拍数<input id="note-edit-beats" type="number" min="0.01" max="128" step="any" inputmode="decimal" required></label>
+              </div>
+              <div class="score-edit-actions">
+                <button class="button note-save" type="submit" value="save">保存</button>
+                <button class="button" id="insert-note" type="submit" value="insert">在后面插入</button>
+                <button class="button note-delete" id="delete-note" type="button">删除</button>
+              </div>
+            </form>
+            <p class="result-feedback" id="note-edit-feedback" role="status" hidden></p>
+          </section>
           <p class="result-feedback" id="result-feedback" role="status" hidden></p>
         </div>
 

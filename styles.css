@@ -181,6 +181,20 @@ select { appearance: none; padding-right: 26px; background-image: url('./assets/
 .playback-position { display: flex; align-items: center; gap: 8px; margin-top: 4px; min-height: 27px; color: #5e593e; font-size: 11px; }
 .playback-position button { padding: 3px 4px; border: 0; background: none; color: #294c37; text-decoration: underline; }
 .playback-position button:focus-visible { outline-color: #395e41; outline-offset: 0; }
+.score-edit-tools { border-top: 1px solid #b6a16a82; margin-top: 10px; padding-top: 8px; color: #3b3c25; }
+.score-edit-toolbar, .score-edit-actions, .note-fields, #note-editor { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 9px; }
+.score-edit-toolbar, #note-editor { justify-content: space-between; }
+.score-edit-toolbar p { font-size: 12px; font-weight: 700; }
+#note-editor { margin-top: 8px; }
+.note-fields label { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; }
+.note-fields select, .note-fields input { border: 1px solid #9b8e67; background: #f9efd3; color: #332e20; color-scheme: light; padding: 4px 6px; min-height: 32px; }
+.note-fields input { width: 76px; }
+.score-edit-tools .button { color: #294c37; padding: 3px 7px; min-height: 30px; font-size: 12px; border-color: #9e936f; }
+.score-edit-tools .button:not(:disabled):hover { background: #d9c798; }
+.score-edit-tools .note-save { background: #294c37; color: #fff1cb; border-color: #294c37; }
+.score-edit-tools .note-save:not(:disabled):hover { background: #365d46; }
+.score-edit-tools .note-delete { color: #8c3528; }
+.score-edit-tools :focus-visible { outline-color: #395e41; outline-offset: 2px; }
 .result-feedback { font-size: 11px; border-top: 1px solid #b6a16a82; color: #643b22; padding-top: 6px; margin-top: 6px; }
 .output-tools { margin-top: 12px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
 .exports { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 7px; margin-left: auto; }

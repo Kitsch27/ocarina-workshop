@@ -30,6 +30,9 @@ let currentNote = null;
 let noteButtons = [];
 let startIndex = null;
 let manual = false;
+let editingScore = false;
+let editIndex = null;
+const noteHistory = [];
 
 function feedback(element, message, error = false) {
   if (element.id === 'upload-feedback') $('offline-help').hidden = true;
@@ -94,9 +97,9 @@ function collectBars(notes) {
 }
 
 function setPlaybackStart(index) {
-  noteButtons[startIndex]?.setAttribute('aria-pressed', 'false');
+  if (!editingScore) noteButtons[startIndex]?.setAttribute('aria-pressed', 'false');
   startIndex = index;
-  noteButtons[startIndex]?.setAttribute('aria-pressed', 'true');
+  if (!editingScore) noteButtons[startIndex]?.setAttribute('aria-pressed', 'true');
   $('playback-start').textContent = index === null ? '点击谱上的音符选择试听起点' : `试听从第 ${index + 1} 格开始`;
   $('reset-playback-start').hidden = index === null;
 }
@@ -107,7 +110,9 @@ function renderScore({ resetFold = false } = {}) {
   const fingeringMode = $('fingering-mode').value;
   const { name, range: [low, high] } = FINGERING_MODES[fingeringMode];
   const requested = $('transposition').value;
-  shift = requested === 'auto' ? chooseShift(score.notes, fingeringMode) : Number(requested);
+  if (!editingScore || requested !== 'auto') {
+    shift = requested === 'auto' ? chooseShift(score.notes, fingeringMode) : Number(requested);
+  }
   if (resetFold) {
     $('fold').checked = score.notes.some(({ pitch }) => pitch != null && (pitch + shift < low || pitch + shift > high));
   }
@@ -135,9 +140,13 @@ function renderScore({ resetFold = false } = {}) {
     notes.className = 'notes';
     for (const { note, index } of group) {
       const key = makeNoteButton(note.target, note.key, note.beats, note.octaveFold, note.confidence);
-      key.setAttribute('aria-pressed', String(index === startIndex));
+      key.setAttribute('aria-pressed', String(index === (editingScore ? editIndex : startIndex)));
       key.addEventListener('click', () => {
         stopPlayback();
+        if (editingScore) {
+          selectEditableNote(index);
+          return;
+        }
         setPlaybackStart(index);
         if (note.key) void playSingle(note.target, key);
       });
@@ -157,6 +166,8 @@ function renderScore({ resetFold = false } = {}) {
 }
 
 function showScore(result, scroll = true, keepSettings = false) {
+  noteHistory.length = 0;
+  setScoreEditing(false);
   score = result;
   setPlaybackStart(null);
   if (!keepSettings) {
@@ -167,6 +178,106 @@ function showScore(result, scroll = true, keepSettings = false) {
   $('bars').scrollTop = 0;
   if (scroll && matchMedia('(max-width: 770px)').matches) $('result').scrollIntoView({ block: 'start' });
 }
+
+const notePitch = $('note-edit-pitch');
+const noteBeats = $('note-edit-beats');
+notePitch.add(new Option('休止符', 'rest'));
+for (let pitch = 0; pitch <= 127; pitch++) notePitch.add(new Option(pitchName(pitch), String(pitch)));
+
+function selectEditableNote(index) {
+  noteButtons[editIndex]?.setAttribute('aria-pressed', 'false');
+  editIndex = index;
+  const note = score.notes[index];
+  $('note-editor').hidden = !note;
+  feedback($('note-edit-feedback'), '');
+  if (!note) {
+    $('note-selection').textContent = '选择谱上的音符或休止符进行校对';
+    return;
+  }
+  noteButtons[index]?.setAttribute('aria-pressed', 'true');
+  // Scores can retain gaps in bar IDs after a deletion.
+  const bars = collectBars(score.notes);
+  const bar = [...bars.keys()].indexOf(note.bar) + 1;
+  const position = bars.get(note.bar).findIndex(item => item.index === index) + 1;
+  $('note-selection').textContent = '第 ' + bar + ' 小节 · 第 ' + position + ' 格 · ' + pitchName(note.pitch);
+  notePitch.value = note.pitch === null ? 'rest' : String(note.pitch);
+  noteBeats.value = note.beats;
+  // Older imports can contain durations larger than the manual-entry limit.
+  noteBeats.max = Math.max(128, note.beats);
+  $('insert-note').disabled = score.notes.length >= MAX_NOTES;
+}
+
+function setScoreEditing(enabled) {
+  if (editingScore === enabled) return;
+  stopPlayback();
+  editingScore = enabled;
+  const button = $('edit-score');
+  button.querySelector('span').textContent = enabled ? '完成校对' : '校对';
+  button.setAttribute('aria-pressed', String(enabled));
+  $('score-edit-tools').hidden = !enabled;
+  $('playback-position').hidden = enabled;
+  $('score-original').hidden = !score.original?.length;
+  $('undo-note').disabled = !noteHistory.length;
+  $('play').setAttribute('aria-describedby', enabled ? 'note-selection' : 'playback-start');
+  if (enabled) {
+    noteButtons[startIndex]?.setAttribute('aria-pressed', 'false');
+    selectEditableNote(startIndex ?? 0);
+  } else {
+    selectEditableNote(null);
+    noteButtons[startIndex]?.setAttribute('aria-pressed', 'true');
+  }
+}
+
+function showNoteEdit(index, message) {
+  const list = $('bars');
+  const scrollTop = list.scrollTop;
+  setPlaybackStart(null);
+  renderScore();
+  list.scrollTop = scrollTop;
+  $('undo-note').disabled = !noteHistory.length;
+  selectEditableNote(index);
+  keepNoteVisible(noteButtons[index]);
+  feedback($('note-edit-feedback'), message);
+}
+
+function editNote(action) {
+  const current = score.notes[editIndex];
+  if (!editingScore || !current) return;
+  const notes = [...score.notes];
+  let index = editIndex;
+  if (action === 'delete') {
+    notes.splice(index, 1);
+    index = Math.min(index, notes.length - 1);
+  } else {
+    const pitch = notePitch.value === 'rest' ? null : Number(notePitch.value);
+    const beats = Number(noteBeats.value);
+    const note = { pitch, beats, bar: current.bar };
+    if (action === 'insert') {
+      if (notes.length >= MAX_NOTES) return;
+      notes.splice(++index, 0, note);
+    } else notes[index] = note;
+  }
+  if (!notes.some(note => note.pitch !== null)) {
+    feedback($('note-edit-feedback'), '请至少保留一个发音音符。', true);
+    return;
+  }
+  noteHistory.push({ score, index: editIndex });
+  if (noteHistory.length > 30) noteHistory.shift();
+  score = { ...score, notes, kind: score.kind === 'demo' ? 'manual' : score.kind };
+  showNoteEdit(index, { save: '已保存音符。', insert: '已插入音符。', delete: '已删除音符。' }[action]);
+}
+
+$('note-editor').addEventListener('submit', event => {
+  event.preventDefault();
+  editNote(event.submitter?.value || 'save');
+});
+$('delete-note').addEventListener('click', () => editNote('delete'));
+$('undo-note').addEventListener('click', () => {
+  const previous = noteHistory.pop();
+  if (!previous) return;
+  score = previous.score;
+  showNoteEdit(previous.index, '已撤销上一处修改。');
+});
 
 function renderGuide() {
   const mode = $('control-layout').value;
@@ -195,6 +306,9 @@ for (let offset = -48; offset <= 48; offset++) {
 for (const id of ['control-layout', 'fingering-mode', 'transposition', 'fold']) {
   $(id).addEventListener('change', () => {
     if (id === 'control-layout' || id === 'fingering-mode') renderGuide();
+    if ($('transposition').value === 'auto' && (id === 'fingering-mode' || id === 'transposition')) {
+      shift = chooseShift(score.notes, $('fingering-mode').value);
+    }
     renderScore();
   });
 }
@@ -244,18 +358,21 @@ function sound(context, pitch, when, seconds) {
   return { fundamental, overtone, envelope };
 }
 
+function keepNoteVisible(button) {
+  if (!button) return;
+  const list = $('bars');
+  const bounds = button.getBoundingClientRect();
+  const section = list.getBoundingClientRect();
+  if (bounds.bottom > section.bottom) list.scrollTop += bounds.bottom - section.bottom + 8;
+  if (bounds.top < section.top) list.scrollTop -= section.top - bounds.top + 6;
+}
+
 function active(button, scroll = false) {
   if (button === currentNote) return;
   currentNote?.classList.remove('active');
   button?.classList.add('active');
   currentNote = button;
-  if (scroll && button) {
-    const list = $('bars');
-    const bounds = button.getBoundingClientRect();
-    const section = list.getBoundingClientRect();
-    if (bounds.bottom > section.bottom) list.scrollTop += bounds.bottom - section.bottom + 8;
-    if (bounds.top < section.top) list.scrollTop -= section.top - bounds.top + 6;
-  }
+  if (scroll) keepNoteVisible(button);
 }
 
 function setPlaying(playing) {
@@ -490,7 +607,16 @@ function openEditor(empty) {
   $('edit-notes').focus();
 }
 $('manual-button').addEventListener('click', () => openEditor(true));
-$('edit-score').addEventListener('click', () => openEditor(false));
+$('edit-score').addEventListener('click', () => {
+  setScoreEditing(!editingScore);
+  if (editingScore) keepNoteVisible(noteButtons[editIndex]);
+  else renderScore();
+});
+$('bulk-edit').addEventListener('click', () => openEditor(false));
+$('score-original').addEventListener('click', () => {
+  showOriginal($('original-image'), score.original);
+  original.showModal();
+});
 $('close-editor').addEventListener('click', () => editor.close());
 $('close-original').addEventListener('click', () => original.close());
 editor.addEventListener('close', () => freePanel($('editor-image')));
