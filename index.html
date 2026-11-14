@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#101a15">
+  <meta name="description" content="上传五线谱或简谱，把旋律转换成 Nintendo Switch 2《时之笛》的按键谱。">
+  <title>时之笛谱工坊</title>
+  <link rel="icon" href="./assets/ocarina-nintendo.png" type="image/png">
+  <link rel="stylesheet" href="./styles.css">
+  <script type="module" src="./app.mjs"></script>
+</head>
+<body>
+  <header class="site-header" id="top">
+    <div class="page-width header-inner">
+      <a class="brand" href="#top">
+        <span class="brand-mark"><img src="./assets/ocarina-nintendo.png" alt=""></span>
+        <span class="brand-text">时之笛谱工坊<span>Ocarina Workshop</span></span>
+      </a>
+      <nav aria-label="主导航">
+        <a class="nav-link" href="#workshop" aria-current="location">转谱工坊</a>
+        <a class="nav-link" href="#guide">按键指南</a>
+      </nav>
+      <span class="platform"><i class="icon" data-icon="gamepad-2"></i>Nintendo Switch 2</span>
+    </div>
+  </header>
+
+  <main class="page-width">
+    <section class="hero frame" aria-labelledby="hero-title">
+      <div class="hero-art" aria-hidden="true"></div>
+      <i class="corner top-left"></i><i class="corner top-right"></i>
+      <i class="corner bottom-left"></i><i class="corner bottom-right"></i>
+      <div class="hero-content">
+        <p class="eyebrow"><span class="diamond"></span> The Legend of Zelda <span class="eyebrow-separator">/</span> Ocarina of Time</p>
+        <h1 id="hero-title">把乐谱变成<br><em>时之笛按键</em></h1>
+        <p class="hero-desc">上传五线谱或简谱，生成适用于《时之笛》<br class="desktop-break">Nintendo Switch 2 重制版的演奏按键。</p>
+        <a class="button hero-button" href="#workshop">开始转谱 <i class="icon" data-icon="arrow-down"></i></a>
+      </div>
+    </section>
+
+    <div class="workbench" id="workshop" tabindex="-1">
+      <section class="panel frame upload-panel" aria-labelledby="upload-heading">
+        <div class="panel-head">
+          <span class="section-icon"><i class="icon" data-icon="file-music"></i></span>
+          <div><h2 id="upload-heading">上传乐谱</h2><p>从图片、PDF 或 MusicXML 导入旋律</p></div>
+          <button class="button text-button sample-button" id="demo-button" type="button"><i class="icon" data-icon="music-2"></i>试用示例</button>
+        </div>
+
+        <div class="droparea" id="droparea">
+          <input id="file-input" type="file" accept=".jpg,.jpeg,.png,.webp,.gif,.bmp,.avif,.heic,.heif,.pdf,.musicxml,.xml" hidden>
+          <span class="drop-icon"><i class="icon" data-icon="cloud-upload"></i></span>
+          <strong>将乐谱拖到这里</strong>
+          <span class="drop-formats">JPG · PNG · WebP · HEIC · PDF · MusicXML</span>
+          <button class="button primary" id="choose-file" type="button"><i class="icon" data-icon="folder-open"></i>选择乐谱</button>
+        </div>
+
+        <div class="selected-file" id="selected-file" hidden>
+          <button class="file-preview" id="open-original" type="button" aria-label="查看原谱"><i class="icon" data-icon="image"></i><img alt="" id="thumbnail" hidden></button>
+          <div class="file-info">
+            <strong id="file-name"></strong>
+            <p id="file-meta"></p>
+            <button class="button text-button compact" id="replace-file" type="button">更换文件</button>
+          </div>
+          <button class="button icon-only ghost" id="clear-file" type="button" title="移除文件" aria-label="移除文件"><i class="icon" data-icon="x"></i></button>
+        </div>
+
+        <div class="recognition-controls">
+          <label for="score-type">识谱方式</label>
+          <select id="score-type">
+            <option value="auto">自动识别</option>
+            <option value="staff">五线谱</option>
+            <option value="numbered">数字简谱</option>
+          </select>
+          <button class="button text-button manual-button" id="manual-button" type="button"><i class="icon" data-icon="square-pen"></i>手动输入</button>
+        </div>
+        <div id="key-control" class="source-options" hidden>
+          <label for="jianpu-key">简谱 1 的音高</label>
+          <select id="jianpu-key">
+            <option value="auto">从谱面读取</option>
+            <option value="C4">C4</option><option value="C#4">C♯4</option><option value="D4">D4</option>
+            <option value="Eb4">E♭4</option><option value="E4">E4</option><option value="F4">F4</option>
+            <option value="F#4">F♯4</option><option value="G4">G4</option><option value="Ab4">A♭4</option>
+            <option value="A4">A4</option><option value="Bb4">B♭4</option><option value="B4">B4</option>
+          </select>
+        </div>
+        <div id="pdf-control" class="source-options" hidden>
+          <label for="pdf-pages">PDF 页码</label>
+          <input id="pdf-pages" type="text" value="1" maxlength="30" placeholder="例如 1–3 或 1,3">
+          <span id="pdf-page-count"></span>
+        </div>
+        <div id="part-control" class="source-options" hidden>
+          <label for="source-part" id="part-label">旋律声部</label>
+          <select id="source-part"><option value="0">最上方声部</option></select>
+        </div>
+        <button class="button primary convert-button" id="convert-button" type="button" hidden><i class="icon" data-icon="scan-line"></i>识别并转谱</button>
+        <div class="progress" id="progress" hidden>
+          <progress id="progress-bar" max="1"></progress>
+          <span id="progress-text" role="status"></span>
+          <button class="button text-button compact" id="cancel-recognition" type="button">取消</button>
+        </div>
+        <p class="feedback" id="upload-feedback" role="status" hidden></p>
+        <p class="privacy"><i class="icon" data-icon="shield-check"></i>文件只在当前浏览器处理</p>
+      </section>
+
+      <section class="panel frame output-panel" id="result" aria-labelledby="result-heading">
+        <div class="panel-head">
+          <span class="section-icon"><i class="icon" data-icon="list-music"></i></span>
+          <div><h2 id="result-heading">按键谱</h2><p>试听旋律，照谱在游戏里演奏</p></div>
+          <button class="button text-button edit-button" id="edit-score" type="button"><i class="icon" data-icon="square-pen"></i>校对</button>
+        </div>
+
+        <div class="score-sheet">
+          <div class="score-head">
+            <div>
+              <div class="score-title-row"><span id="score-kind" class="score-kind">示例</span><h3 id="score-name">欢乐颂</h3></div>
+              <p id="score-meta" class="score-meta"></p>
+            </div>
+            <button class="button play-button" id="play" type="button"><i class="icon" data-icon="play"></i><span>试听</span></button>
+          </div>
+          <div class="bars" id="bars" aria-label="游戏按键序列"></div>
+          <p class="result-feedback" id="result-feedback" role="status" hidden></p>
+        </div>
+
+        <div class="output-tools">
+          <details class="arrange-options" id="arrange-options">
+            <summary><i class="icon" data-icon="sliders-horizontal"></i>演奏设置<i class="icon chev" data-icon="chevron-down"></i></summary>
+            <div class="settings-popover">
+              <label for="control-layout">游戏按键布局</label>
+              <select id="control-layout"><option value="normal">标准</option><option value="classic">经典</option></select>
+              <label for="transposition">整体移调</label>
+              <select id="transposition"><option value="auto">自动选择</option><option value="0">原调</option></select>
+              <label for="tempo">试听速度</label>
+              <div class="tempo"><input id="tempo" type="number" min="30" max="240" value="96"><span>BPM</span></div>
+              <label class="fold-label"><input id="fold" type="checkbox">把超出音域的音单独移八度</label>
+            </div>
+          </details>
+          <div class="exports">
+            <button class="button ghost" id="copy" type="button"><i class="icon" data-icon="copy"></i><span>复制</span></button>
+            <button class="button secondary" id="download" type="button"><i class="icon" data-icon="download"></i><span>下载按键谱</span></button>
+          </div>
+        </div>
+        <p class="feedback" id="export-feedback" role="status" hidden></p>
+      </section>
+    </div>
+
+    <section class="guide frame" id="guide" aria-labelledby="guide-heading">
+      <div class="panel-head">
+        <span class="section-icon"><i class="icon" data-icon="book-open"></i></span>
+        <div><h2 id="guide-heading">按键指南</h2><p>打开游戏中的陶笛，进入自由演奏</p></div>
+        <a class="button text-button source-button" href="https://github.com/diacoviello/LoZ-Ocarina-Note-Charts#quick-reference" target="_blank" rel="noopener noreferrer">完整指法表<i class="icon" data-icon="external-link"></i></a>
+      </div>
+      <div class="guide-grid">
+        <div class="guide-item">
+          <h3><span class="diamond"></span>五个基础音</h3>
+          <div id="base-notes" class="base-notes"></div>
+          <p>点按可试听。音名沿用指法表的记谱八度。</p>
+        </div>
+        <div class="guide-item">
+          <h3><span class="diamond"></span>升降音</h3>
+          <div class="modifier-list">
+            <span id="pad-guide">十字键 ↑ / ↓</span><small>±1 半音</small>
+            <span>左摇杆 ↑ / ↓</span><small>±2 半音</small>
+          </div>
+          <p>谱中「摇」表示左摇杆。先按住升降音键，再按发音键。</p>
+        </div>
+        <div class="guide-item">
+          <h3><span class="diamond"></span>移调与音域</h3>
+          <div class="range-display">B3 <span>—</span> F5</div>
+          <p>自动移调优先保持音程。单独移八度的音会用 * 标记。</p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="page-width site-footer">
+    <span><span class="diamond"></span> 时之笛谱工坊 · 玩家制作</span>
+    <div>
+      <a href="https://www.nintendo.com/es-es/Juegos/Juegos-de-Nintendo-Switch-2/The-Legend-of-Zelda-Ocarina-of-Time-3115664.html" target="_blank" rel="noopener noreferrer">美术素材 © Nintendo</a>
+      <a href="./credits.html">来源与识谱说明</a>
+    </div>
+  </footer>
+
+  <dialog class="modal" id="edit-dialog" aria-labelledby="edit-heading">
+    <form id="editor">
+      <div class="modal-head">
+        <h2 id="edit-heading">校对音符</h2>
+        <button class="button icon-only ghost" id="close-editor" type="button" aria-label="关闭"><i class="icon" data-icon="x"></i></button>
+      </div>
+      <label for="edit-title">曲名</label>
+      <input id="edit-title" maxlength="100" placeholder="未命名乐谱">
+      <label for="edit-notes">音符与拍数</label>
+      <p class="editor-help" id="editor-help">用空格隔开音符。<code>C4:2</code> 表示两拍，<code>0:0.5</code> 表示半拍休止，<code>|</code> 划分小节。简谱可用 <code>1=G4</code> 指定调，<code>1'</code> 升八度，<code>1,</code> 降八度。</p>
+      <textarea id="edit-notes" rows="5" spellcheck="false" aria-describedby="editor-help" placeholder="C4 D4 E4:2 | 0 G4 G4:2"></textarea>
+      <p class="feedback" id="edit-feedback" role="alert" hidden></p>
+      <div class="modal-actions">
+        <button class="button ghost" id="editor-original" type="button" hidden><i class="icon" data-icon="image"></i>对照原谱</button>
+        <button class="button primary" type="submit"><i class="icon" data-icon="check"></i>生成按键谱</button>
+      </div>
+      <div class="editor-image" id="editor-image" hidden></div>
+    </form>
+  </dialog>
+
+  <dialog class="modal original-modal" id="original-dialog" aria-labelledby="original-title">
+    <div class="modal-head">
+      <h2 id="original-title">原谱</h2>
+      <button class="button icon-only ghost" id="close-original" type="button" aria-label="关闭"><i class="icon" data-icon="x"></i></button>
+    </div>
+    <div id="original-image" class="editor-image"></div>
+  </dialog>
+</body>
+</html>
