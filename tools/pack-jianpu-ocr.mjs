@@ -1,5 +1,5 @@
 import { readFileSync, writeFileSync } from 'node:fs';
-import { brotliCompressSync, constants, gunzipSync, gzipSync } from 'node:zlib';
+import { gunzipSync, gzipSync } from 'node:zlib';
 
 const vendor = new URL('../vendor/tesseract/', import.meta.url);
 const read = name => readFileSync(new URL(name, vendor));
@@ -23,10 +23,6 @@ for (const [index, start] of offsets.entries()) {
   offset += end - start;
 }
 write('eng-jianpu-v1.traineddata.gz', Buffer.concat(components));
-const worker = Buffer.concat([
+write('jianpu-worker-v1.js.gz', Buffer.concat([
   read('tesseract-core-lstm.wasm.js'), Buffer.from('\n;\n'), read('worker.min.js'),
-]);
-write('jianpu-worker-v1.js.gz', worker);
-writeFileSync(new URL('jianpu-worker-v1.js.br', vendor), brotliCompressSync(worker, {
-  params: { [constants.BROTLI_PARAM_QUALITY]: 11 },
-}));
+]));

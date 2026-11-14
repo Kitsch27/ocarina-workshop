@@ -553,34 +553,12 @@ function releaseSelected() {
 
 function clearFile() {
   cancelTask(false);
-  stopJianpuPrefetch();
   releaseSelected();
   input.value = '';
   $('selected-file').hidden = true;
   drop.hidden = false;
   feedback($('upload-feedback'), '');
   renderSourceOptions();
-}
-
-let jianpuPrefetch;
-
-async function prefetchJianpu() {
-  if (jianpuPrefetch) return;
-  const controller = new AbortController();
-  jianpuPrefetch = controller;
-  try {
-    const { prepareTextRecognizer } = await import('./jianpu-ocr.mjs?v=11');
-    await prepareTextRecognizer(controller.signal);
-  } catch {
-    // Show download errors only when the user starts a conversion.
-  } finally {
-    if (jianpuPrefetch === controller) jianpuPrefetch = null;
-  }
-}
-
-function stopJianpuPrefetch() {
-  jianpuPrefetch?.abort();
-  jianpuPrefetch = null;
 }
 
 function partNames(count) {
@@ -599,11 +577,6 @@ async function stageFile(file) {
   releaseSelected();
   const source = { file, kind, ready: false, preview: [], parts: [] };
   selected = source;
-  if (recognitionType.value === 'numbered' && (kind === 'image' || kind === 'heic' || kind === 'pdf')) {
-    void prefetchJianpu();
-  } else {
-    stopJianpuPrefetch();
-  }
   $('file-name').textContent = file.name;
   const kindName = { pdf: 'PDF', xml: 'MusicXML', heic: 'HEIC', image: '图片', audio: '音频' }[kind];
   $('file-meta').textContent = `${kindName} · ${file.size >= 1024 * 1024 ? (file.size / 1024 / 1024).toFixed(1) + ' MB' : Math.ceil(file.size / 1024) + ' KB'}`;
@@ -672,8 +645,6 @@ $('open-original').addEventListener('click', () => {
 });
 recognitionType.addEventListener('change', () => {
   if (selected) selected.parts = [];
-  if (recognitionType.value === 'numbered') void prefetchJianpu();
-  else stopJianpuPrefetch();
   renderSourceOptions();
 });
 
@@ -829,14 +800,10 @@ async function recognizeImages(run, source, part, type, key, pages) {
       }
     }
     if (!recognized && (type === 'numbered' || (type === 'auto' && !staffDetected))) {
-      jianpu ??= await import('./jianpu.mjs?v=11');
-      if (!run.tesseract) {
-        const starting = jianpu.makeTextRecognizer(signal, (message, ratio) => {
-          progress(run, currentPageLabel + message, currentBase + weight * ratio);
-        });
-        stopJianpuPrefetch();
-        run.tesseract = await starting;
-      }
+      jianpu ??= await import('./jianpu.mjs?v=10');
+      run.tesseract ??= await jianpu.makeTextRecognizer(signal, (message, ratio) => {
+        progress(run, currentPageLabel + message, currentBase + weight * ratio);
+      });
       recognized = await raceAbort(jianpu.recognizeJianpu(canvas, run.tesseract, signal, knownKey, part), signal);
       partCount = Math.max(partCount, recognized.parts);
       if (recognized.key) knownKey = recognized.key;
