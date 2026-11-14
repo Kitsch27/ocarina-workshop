@@ -18,6 +18,16 @@
 
 把仓库根目录设为 GitHub Pages 的发布来源。在 **Settings → Pages** 里选择 **Deploy from a branch**，然后选择 `main` 和 `/(root)`。页面和识谱模型都已包含在仓库里。
 
+## 离线使用
+
+下载并解压项目 ZIP。打开终端，进入包含 `index.html` 的目录，运行下面的命令，再用浏览器打开 [本机工坊](http://127.0.0.1:8000/)。
+
+    python -m http.server 8000 --bind 127.0.0.1
+
+命令需要 Python 3。Windows 也可用 `py -3`，macOS 和 Linux 通常可用 `python3`。识谱模型随压缩包提供，解压后可断网识谱。启动服务的终端需保持打开。
+
+[下载项目 ZIP](https://github.com/Kitsch27/ocarina-workshop/archive/refs/heads/main.zip)
+
 ## 素材与指法
 
 陶笛图片来自任天堂官网，版式参考 Zelda Notes。这是玩家制作的工具。[任天堂官网](https://www.nintendo.com/es-es/Juegos/Juegos-de-Nintendo-Switch-2/The-Legend-of-Zelda-Ocarina-of-Time-3115664.html)

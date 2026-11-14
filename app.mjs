@@ -1,6 +1,6 @@
 import { arrange, baseFingers, chooseShift, controlSymbol, DEMO, FINGERING_MODES, formatMelody, KINDS, LAYOUTS, mergeTies, parseMelody, pitchName } from './music.mjs?v=8';
 import { scoreExport, scoreImages, tablatureText } from './score-export.mjs?v=6';
-import { fileKind, MAX_FILE_BYTES, openMusicXML, openPdf, parsePages, readImage, readMusicXML, readPdfPage } from './score-files.mjs?v=8';
+import { fileKind, MAX_FILE_BYTES, openMusicXML, openPdf, parsePages, readImage, readMusicXML, readPdfPage } from './score-files.mjs?v=9';
 
 const $ = id => document.getElementById(id);
 const input = $('file-input');
@@ -32,6 +32,7 @@ let startIndex = null;
 let manual = false;
 
 function feedback(element, message, error = false) {
+  if (element.id === 'upload-feedback') $('offline-help').hidden = true;
   element.textContent = message;
   element.classList.toggle('error', error);
   element.hidden = !message;
@@ -799,7 +800,7 @@ async function recognizeImages(run, source, part, type, key, pages) {
       }
     }
     if (!recognized && (type === 'numbered' || (type === 'auto' && !staffDetected))) {
-      jianpu ??= await import('./jianpu.mjs?v=7');
+      jianpu ??= await import('./jianpu.mjs?v=9');
       run.tesseract ??= await jianpu.makeTextRecognizer(signal, (message, ratio) => {
         progress(run, currentPageLabel + message, currentBase + weight * ratio);
       });
@@ -893,7 +894,10 @@ $('convert-button').addEventListener('click', async () => {
     showScore(result);
     feedback($('upload-feedback'), '转换完成，可在按键谱中校对。');
   } catch (error) {
-    if (task === run) feedback($('upload-feedback'), error.message || '识谱失败，请重试。', true);
+    if (task === run) {
+      feedback($('upload-feedback'), error.message || '识谱失败，请重试。', true);
+      $('offline-help').hidden = error.name !== 'OcrLoadError';
+    }
   } finally {
     disposeTask(run);
     if (task === run) {

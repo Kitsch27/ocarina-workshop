@@ -28,19 +28,6 @@ export function imageScale(width, height, target = 1) {
   return Math.min(target, MAX_EDGE / Math.max(width, height), Math.sqrt(MAX_PIXELS / (width * height)));
 }
 
-export function loadClassicScript(url) {
-  return new Promise((resolve, reject) => {
-    const script = document.createElement('script');
-    script.src = url;
-    script.onload = resolve;
-    script.onerror = () => {
-      script.remove();
-      reject(new Error('识别组件加载失败，请刷新页面重试。'));
-    };
-    document.head.append(script);
-  });
-}
-
 async function loadImage(file, kind) {
   let blob = file;
   if (kind === 'heic') {

@@ -1,34 +1,5 @@
 import { degreePitch, rootPitch } from './music.mjs';
-import { loadClassicScript } from './score-files.mjs';
-
-const tess = './vendor/tesseract/';
-const tessUrl = name => new URL(tess + name, import.meta.url).href;
-let library;
-
-export async function makeTextRecognizer(signal, onProgress) {
-  library ??= loadClassicScript(tessUrl('tesseract.min.js')).catch(error => {
-    library = null;
-    throw error;
-  });
-  await library;
-  signal.throwIfAborted();
-  const worker = await globalThis.Tesseract.createWorker('eng', 1, {
-    workerPath: tessUrl('worker.min.js'),
-    corePath: tessUrl(''),
-    langPath: tessUrl('').replace(/\/$/, ''),
-    workerBlobURL: false,
-    cacheMethod: 'write',
-    logger: ({ status, progress }) => {
-      onProgress(status === 'recognizing text' ? '正在读取简谱数字…' : '载入简谱识别组件…', 0.28 + 0.6 * progress);
-    },
-    errorHandler: () => {},
-  });
-  if (signal.aborted) {
-    await worker.terminate();
-    signal.throwIfAborted();
-  }
-  return worker;
-}
+export { makeTextRecognizer } from './jianpu-ocr.mjs?v=9';
 
 function components(canvas) {
   const { width, height } = canvas;
