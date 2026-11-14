@@ -6,12 +6,14 @@ export const MAX_FILE_BYTES = 25 * 1024 * 1024;
 const JPG = /^image\/(?:jpe?g|png|webp|avif|bmp|gif|x-ms-bmp)$/i;
 const IMAGE_EXT = /\.(?:jpe?g|png|webp|avif|bmp|gif)$/i;
 const HEIC = /\.(?:heic|heif)$/i;
+const AUDIO_EXT = /\.(?:mp3|wav|m4a|aac|ogg|oga|opus|flac|aif|aiff)$/i;
 
 export function fileKind(file) {
   if (/\.(?:musicxml|xml)$/i.test(file.name) || /(?:musicxml|\/xml)$/.test(file.type)) return 'xml';
   if (/\.pdf$/i.test(file.name) || file.type === 'application/pdf') return 'pdf';
   if (HEIC.test(file.name) || /^image\/hei[cf]$/i.test(file.type)) return 'heic';
   if (JPG.test(file.type) || IMAGE_EXT.test(file.name)) return 'image';
+  if (AUDIO_EXT.test(file.name) || file.type.startsWith('audio/')) return 'audio';
   return null;
 }
 

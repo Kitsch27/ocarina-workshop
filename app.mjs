@@ -1,6 +1,6 @@
-import { arrange, baseFingers, chooseShift, controlSymbol, DEMO, FINGERING_MODES, formatMelody, KINDS, LAYOUTS, mergeTies, parseMelody, pitchName } from './music.mjs?v=5';
+import { arrange, baseFingers, chooseShift, controlSymbol, DEMO, FINGERING_MODES, formatMelody, KINDS, LAYOUTS, mergeTies, parseMelody, pitchName } from './music.mjs?v=8';
 import { scoreExport, scoreImages, tablatureText } from './score-export.mjs?v=6';
-import { fileKind, MAX_FILE_BYTES, openMusicXML, openPdf, parsePages, readImage, readMusicXML, readPdfPage } from './score-files.mjs';
+import { fileKind, MAX_FILE_BYTES, openMusicXML, openPdf, parsePages, readImage, readMusicXML, readPdfPage } from './score-files.mjs?v=8';
 
 const $ = id => document.getElementById(id);
 const input = $('file-input');
@@ -518,8 +518,11 @@ function canvasPreview(canvas, number) {
 }
 
 function renderSourceOptions() {
-  const visual = selected?.kind !== 'xml';
+  const audioFile = selected?.kind === 'audio';
+  const visual = selected?.kind !== 'xml' && !audioFile;
+  recognitionType.hidden = $('score-type-label').hidden = audioFile;
   recognitionType.disabled = !visual || Boolean(task);
+  $('audio-hint').hidden = !audioFile;
   $('key-control').hidden = !visual || recognitionType.value === 'staff' ||
     (!selected && recognitionType.value !== 'numbered');
   $('pdf-control').hidden = selected?.kind !== 'pdf';
@@ -531,6 +534,7 @@ function renderSourceOptions() {
   $('part-label').textContent = selected?.kind === 'xml' ? '旋律声部' : '读取声部';
   $('pdf-page-count').textContent = selected?.pdf ? `共 ${selected.pdf.numPages} 页` : '';
   $('convert-button').hidden = !selected;
+  $('convert-label').textContent = audioFile ? '提取旋律并转谱' : '识别并转谱';
   $('convert-button').disabled = !selected?.ready || Boolean(task);
   $('progress').hidden = !task;
   for (const id of ['jianpu-key', 'source-part', 'pdf-pages', 'demo-button']) $(id).disabled = Boolean(task);
@@ -564,8 +568,8 @@ async function stageFile(file) {
   if (!file) return;
   const kind = fileKind(file);
   if (!kind || file.size === 0 || file.size > MAX_FILE_BYTES) {
-    feedback($('upload-feedback'), !kind ? '请选择常见图片、PDF 或 MusicXML 文件。' :
-      file.size === 0 ? '文件为空，请重新选择。' : '单个文件最大 25 MB，请缩小图片或分割 PDF。', true);
+    feedback($('upload-feedback'), !kind ? '请选择常见图片、PDF、MusicXML 或音频文件。' :
+      file.size === 0 ? '文件为空，请重新选择。' : '单个文件最大 25 MB，请压缩或分段后重试。', true);
     return;
   }
   cancelTask(false);
@@ -573,13 +577,15 @@ async function stageFile(file) {
   const source = { file, kind, ready: false, preview: [], parts: [] };
   selected = source;
   $('file-name').textContent = file.name;
-  const kindName = { pdf: 'PDF', xml: 'MusicXML', heic: 'HEIC', image: '图片' }[kind];
+  const kindName = { pdf: 'PDF', xml: 'MusicXML', heic: 'HEIC', image: '图片', audio: '音频' }[kind];
   $('file-meta').textContent = `${kindName} · ${file.size >= 1024 * 1024 ? (file.size / 1024 / 1024).toFixed(1) + ' MB' : Math.ceil(file.size / 1024) + ' KB'}`;
   $('open-original').disabled = true;
+  const originalIcon = $('open-original').querySelector('.icon');
+  setIcon(originalIcon, kind === 'audio' ? 'music-2' : 'image');
   $('pdf-pages').value = '1';
   $('selected-file').hidden = false;
   drop.hidden = true;
-  feedback($('upload-feedback'), '正在打开原谱…');
+  feedback($('upload-feedback'), kind === 'audio' ? '' : '正在打开原谱…');
   renderSourceOptions();
   try {
     if (kind === 'xml') {
@@ -589,7 +595,7 @@ async function stageFile(file) {
       source.pdf = await openPdf(file);
       if (selected !== source) { await source.pdf.destroy(); return; }
       source.preview = [await canvasPreview(await readPdfPage(source.pdf, 1, 950), 1)];
-    } else {
+    } else if (kind !== 'audio') {
       source.canvas = await readImage(file, kind);
       source.preview = [await canvasPreview(source.canvas)];
     }
@@ -822,7 +828,28 @@ async function recognizeImages(run, source, part, type, key, pages) {
 function disposeTask(run) {
   clearTimeout(run.deadline);
   run.staff?.terminate();
+  run.audioWorker?.terminate();
   run.tesseract?.terminate().catch(() => {});
+}
+
+async function recognizeAudio(run, file) {
+  const { signal } = run.controller;
+  const { readAudio } = await import('./audio-files.mjs?v=8');
+  signal.throwIfAborted();
+  progress(run, '正在解码音频…', 0.08);
+  const samples = await raceAbort(readAudio(file, signal), signal);
+  progress(run, '正在提取旋律…', 0.18);
+  const worker = new Worker(new URL('./audio-worker.mjs?v=8', import.meta.url), { type: 'module' });
+  run.audioWorker = worker;
+  return raceAbort(new Promise((resolve, reject) => {
+    worker.onmessage = ({ data }) => {
+      if (data.error) reject(new Error(data.error));
+      else if (data.result) resolve(data.result);
+      else progress(run, '正在提取旋律…', 0.18 + 0.8 * data.progress);
+    };
+    worker.onerror = () => reject(new Error('音频识别组件加载失败，请刷新页面后重试。'));
+    worker.postMessage(samples, [samples.buffer]);
+  }), signal);
 }
 
 function cancelTask(notice = true) {
@@ -847,10 +874,13 @@ $('convert-button').addEventListener('click', async () => {
   try {
     feedback($('upload-feedback'), '');
     renderSourceOptions();
-    progress(run, '准备识别乐谱…');
+    progress(run, source.kind === 'audio' ? '准备读取音频…' : '准备识别乐谱…');
     const title = source.file.name.replace(/\.[^.]+$/, '').slice(0, 100) || '未命名乐谱';
     let result;
-    if (source.kind === 'xml') {
+    if (source.kind === 'audio') {
+      const parsed = await recognizeAudio(run, source.file);
+      result = { ...parsed, kind: 'audio', title, notices: ['时值按录音估算，小节按时间分组。可试听并校对音高和拍数。'] };
+    } else if (source.kind === 'xml') {
       const parsed = readMusicXML(source.xml, part);
       result = { ...parsed, kind: 'xml', title: source.xml.title || title, tempo: source.xml.tempo };
     } else {

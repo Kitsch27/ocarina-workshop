@@ -5,11 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark">
   <meta name="theme-color" content="#101a15">
-  <meta name="description" content="上传五线谱或简谱，把旋律转换成 Nintendo Switch 2《时之笛》的按键谱。">
+  <meta name="description" content="上传乐谱或音频，把旋律转换成 Nintendo Switch 2《时之笛》的按键谱。">
   <title>时之笛谱工坊</title>
   <link rel="icon" href="./assets/ocarina-nintendo.png" type="image/png">
   <link rel="stylesheet" href="./styles.css?v=5">
-  <script type="module" src="./app.mjs?v=7"></script>
+  <script type="module" src="./app.mjs?v=8"></script>
 </head>
 <body id="top">
   <header class="site-header">
@@ -30,7 +30,7 @@
       <div class="hero-content">
         <p class="eyebrow"><span class="diamond"></span> The Legend of Zelda <span class="eyebrow-separator">/</span> Ocarina of Time</p>
         <h1 id="hero-title">把乐谱变成<br><em>时之笛按键</em></h1>
-        <p class="hero-desc">上传五线谱或简谱，生成适用于《时之笛》<br class="desktop-break">Nintendo Switch 2 重制版的演奏按键。</p>
+        <p class="hero-desc">上传乐谱或音频，生成适用于《时之笛》<br class="desktop-break">Nintendo Switch 2 重制版的演奏按键。</p>
         <a class="button hero-button" href="#workshop">开始转谱 <i class="icon" data-icon="arrow-down"></i></a>
       </div>
     </section>
@@ -39,16 +39,16 @@
       <section class="panel frame upload-panel" aria-labelledby="upload-heading">
         <div class="panel-head">
           <span class="section-icon"><i class="icon" data-icon="file-music"></i></span>
-          <div><h2 id="upload-heading">上传乐谱</h2><p>从图片、PDF 或 MusicXML 导入旋律</p></div>
+          <div><h2 id="upload-heading">导入乐谱或音频</h2><p>支持图片、PDF、MusicXML 和单旋律录音</p></div>
           <button class="button text-button sample-button" id="demo-button" type="button"><i class="icon" data-icon="music-2"></i>试用示例</button>
         </div>
 
         <div class="droparea" id="droparea">
-          <input id="file-input" type="file" accept=".jpg,.jpeg,.png,.webp,.gif,.bmp,.avif,.heic,.heif,.pdf,.musicxml,.xml" hidden>
+          <input id="file-input" type="file" accept=".jpg,.jpeg,.png,.webp,.gif,.bmp,.avif,.heic,.heif,.pdf,.musicxml,.xml,.mp3,.wav,.m4a,.aac,.ogg,.oga,.opus,.flac,.aif,.aiff,audio/*" hidden>
           <span class="drop-icon"><i class="icon" data-icon="cloud-upload"></i></span>
-          <strong>将乐谱拖到这里</strong>
-          <span class="drop-formats">JPG · PNG · WebP · HEIC · PDF · MusicXML</span>
-          <button class="button primary" id="choose-file" type="button"><i class="icon" data-icon="folder-open"></i>选择乐谱</button>
+          <strong>将乐谱或音频拖到这里</strong>
+          <span class="drop-formats">JPG · PNG · PDF · MusicXML · MP3 · WAV · M4A</span>
+          <button class="button primary" id="choose-file" type="button"><i class="icon" data-icon="folder-open"></i>选择文件</button>
         </div>
 
         <div class="selected-file" id="selected-file" hidden>
@@ -62,7 +62,7 @@
         </div>
 
         <div class="recognition-controls">
-          <label for="score-type">识谱方式</label>
+          <label for="score-type" id="score-type-label">识谱方式</label>
           <select id="score-type">
             <option value="auto">自动识别</option>
             <option value="staff">五线谱</option>
@@ -89,7 +89,8 @@
           <label for="source-part" id="part-label">旋律声部</label>
           <select id="source-part"><option value="0">最上方声部</option></select>
         </div>
-        <button class="button primary convert-button" id="convert-button" type="button" hidden><i class="icon" data-icon="scan-line"></i>识别并转谱</button>
+        <p class="privacy" id="audio-hint" hidden>清晰的独唱、口哨或单件乐器录音效果较好。音频限 3 分钟、25 MB。</p>
+        <button class="button primary convert-button" id="convert-button" type="button" hidden><i class="icon" data-icon="scan-line"></i><span id="convert-label">识别并转谱</span></button>
         <div class="progress" id="progress" hidden>
           <progress id="progress-bar" max="1"></progress>
           <span id="progress-text" role="status"></span>
