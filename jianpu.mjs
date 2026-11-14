@@ -117,6 +117,20 @@ function canvasFor(width, height) {
   return { canvas, ctx };
 }
 
+function drawGlyph(rgba, box, ink, width, x, y) {
+  const scale = 35 / box.h;
+  const outWidth = Math.ceil(box.w * scale);
+  const left = x - Math.floor(outWidth / 2);
+  for (let yy = 0; yy < 35; yy++) {
+    const source = (box.y + Math.floor(yy / scale)) * width + box.x;
+    for (let xx = 0; xx < outWidth; xx++) {
+      if (!ink[source + Math.min(box.w - 1, Math.floor(xx / scale))]) continue;
+      const pixel = ((y + yy) * rgba.width + left + xx) * 4;
+      rgba.data[pixel] = rgba.data[pixel + 1] = rgba.data[pixel + 2] = 0;
+    }
+  }
+}
+
 async function recognizeGlyphs(rows, ink, width, worker, signal) {
   const cellWidth = 50, cellHeight = 68, columns = 34, perBatch = columns * 12;
   const positions = rows.flatMap(row => row.digits);
@@ -133,19 +147,8 @@ async function recognizeGlyphs(rows, ink, width, worker, signal) {
     const { canvas, ctx } = canvasFor(cellWidth * cols, cellHeight * Math.ceil(batch.length / columns));
     const rgba = ctx.getImageData(0, 0, canvas.width, canvas.height);
     for (let index = 0; index < batch.length; index++) {
-      const box = batch[index];
-      const scale = 35 / box.h;
-      const outWidth = Math.ceil(box.w * scale);
-      const left = (index % columns) * cellWidth + Math.floor((cellWidth - outWidth) / 2);
-      const top = Math.floor(index / columns) * cellHeight + 16;
-      for (let yy = 0; yy < 35; yy++) {
-        const source = (box.y + Math.floor(yy / scale)) * width + box.x;
-        for (let xx = 0; xx < outWidth; xx++) {
-          if (!ink[source + Math.min(box.w - 1, Math.floor(xx / scale))]) continue;
-          const pixel = ((top + yy) * canvas.width + left + xx) * 4;
-          rgba.data[pixel] = rgba.data[pixel + 1] = rgba.data[pixel + 2] = 0;
-        }
-      }
+      drawGlyph(rgba, batch[index], ink, width, (index % columns) * cellWidth + 25,
+        Math.floor(index / columns) * cellHeight + 16);
     }
     ctx.putImageData(rgba, 0, 0);
     const { data } = await worker.recognize(canvas, {}, { blocks: true, text: true });
@@ -164,12 +167,64 @@ async function recognizeGlyphs(rows, ink, width, worker, signal) {
   return matches;
 }
 
-function timingMarks(box, row, all, medianGap) {
+function recoverMissingDigits(rows, glyphs, ink, width) {
+  const missing = [];
+  const examples = new Map();
+  const sample = box => Uint8Array.from({ length: 16 * 24 }, (_, i) => Number(Boolean(ink[
+    (box.y + Math.floor(Math.floor(i / 16) * box.h / 24)) * width + box.x + Math.floor((i % 16) * box.w / 16)
+  ])));
+  for (const row of rows) for (const box of row.digits) {
+    const glyph = glyphs.get(box);
+    if (glyph?.confidence >= 0.90 && /^[0-7]$/.test(glyph.text)) {
+      if (!examples.has(glyph.text)) examples.set(glyph.text, []);
+      const set = examples.get(glyph.text);
+      if (set.length < 16) set.push({ pixels: sample(box), ratio: box.w / box.h });
+    } else if (!glyph && box.h >= row.h * 0.84 && box.w / box.h >= 0.26) missing.push(box);
+  }
+  if (examples.size < 2) return;
+  for (const box of missing) {
+    const pixels = sample(box);
+    const ranked = [...examples].map(([text, set]) => {
+      let best = Infinity;
+      for (const { pixels: reference, ratio } of set) {
+        if (Math.abs(box.w / box.h - ratio) > 0.18) continue;
+        let mismatch = 0;
+        for (const [i, value] of pixels.entries()) mismatch += value !== reference[i];
+        best = Math.min(best, mismatch / pixels.length);
+      }
+      return { text, distance: best };
+    }).sort((a, b) => a.distance - b.distance);
+    const [best, next] = ranked;
+    if (best.distance <= 0.17 && next.distance - best.distance >= 0.055) {
+      glyphs.set(box, { text: best.text, confidence: 0.8 });
+    }
+  }
+}
+
+function underlineStrokes(box, ink, width, height) {
+  const span = Math.min(Math.floor(box.h * 0.24), Math.floor((box.w + 1) / 2));
+  const center = Math.round(box.cx);
+  const left = Math.max(0, center - span);
+  const right = Math.min(width - 1, center + span);
+  const bottom = box.y + box.h;
+  const strokes = [];
+  let thickness = 0;
+  for (let y = bottom; y < Math.min(height, bottom + Math.ceil(box.h * 0.64)); y++) {
+    let pixels = 0;
+    for (let x = left; x <= right; x++) if (ink[y * width + x]) pixels++;
+    if (pixels >= (right - left + 1) * 0.9) thickness++;
+    else if (thickness) {
+      strokes.push(thickness);
+      thickness = 0;
+    }
+  }
+  if (thickness) strokes.push(thickness);
+  return strokes;
+}
+
+function timingMarks(box, row, all, medianGap, underlineCount) {
   const xTol = Math.max(box.w * 0.58, row.h * 0.22);
   const near = all.filter(mark => mark !== box && Math.abs(mark.cx - box.cx) <= xTol && mark.h <= row.h * 0.38);
-  const under = all.filter(mark => mark.h <= row.h * 0.26 && mark.w / mark.h >= 2.1 && mark.w >= box.w * 0.7 &&
-    mark.y >= box.y + box.h && mark.y - (box.y + box.h) < row.h * 0.67 &&
-    mark.x <= box.cx + xTol && mark.x + mark.w >= box.cx - xTol);
   const dots = near.filter(mark => mark.w <= row.h * 0.35 && mark.h <= row.h * 0.33 &&
     mark.w / mark.h >= 0.42 && mark.w / mark.h < 2.1 && Math.abs(mark.cy - box.cy) > row.h * 0.48 &&
     Math.abs(mark.cy - box.cy) < row.h * 1.48);
@@ -177,7 +232,7 @@ function timingMarks(box, row, all, medianGap) {
   const dotted = all.filter(mark => mark.cx > box.x + box.w && mark.cx - (box.x + box.w) < Math.min(medianGap * 0.55, row.h * 0.74) &&
     Math.abs(mark.cy - box.cy) < row.h * 0.31 && mark.w <= row.h * 0.23 && mark.h <= row.h * 0.24 &&
     mark.w / mark.h > 0.45 && mark.w / mark.h < 2.1).length;
-  return { beats: (2 - 2 ** -Math.min(dotted, 2)) / (2 ** Math.min(under.length, 3)), octave };
+  return { beats: (2 - 2 ** -Math.min(dotted, 2)) / (2 ** Math.min(underlineCount, 3)), octave };
 }
 
 async function readHeader(canvas, firstRow, worker) {
@@ -219,11 +274,13 @@ export async function recognizeJianpu(canvas, worker, signal, key, part) {
   const rows = findRows(boxes, canvas.width, canvas.height);
   if (!rows.length) return { notes: [], notices: [], parts: 0 };
   const strongest = rows.reduce((best, row) => row.digits.length > best.digits.length ? row : best);
-  const barlines = boxes.filter(mark => mark.w / mark.h < 0.15 && mark.h >= strongest.h * 0.93);
+  const barlines = boxes.filter(mark => mark.x > 1 && mark.x + mark.w < canvas.width - 1 && mark.w / mark.h < 0.19);
+  const rowDividers = row => barlines.filter(mark => mark.y < row.y - row.h * 0.53 &&
+    mark.y + mark.h > row.y + row.h * 0.53 && mark.cx > row.digits[0].cx - row.h * 3 &&
+    mark.cx < row.digits.at(-1).cx + row.h * 5);
   const wideRows = rows.filter(row => row.digits.length >= 4 &&
     row.digits.at(-1).cx - row.digits[0].cx >= canvas.width * 0.23 && row.h <= strongest.h * 1.47);
-  const firstMusic = wideRows.find(row => barlines.filter(mark => mark.y < row.y - row.h * 0.2 &&
-    mark.y + mark.h > row.y + row.h * 0.2).length >= 2) ??
+  const firstMusic = wideRows.find(row => rowDividers(row).length >= 2) ??
     wideRows.find(row => row.digits.length >= Math.max(6, strongest.digits.length * 0.45)) ?? rows[0];
   const header = await readHeader(canvas, firstMusic, worker);
   const resolvedKey = key === 'auto' ? header.key : key;
@@ -231,11 +288,19 @@ export async function recognizeJianpu(canvas, worker, signal, key, part) {
   const usableRows = rows.filter(row => row.y >= header.end && row.h <= strongest.h * 1.47);
   if (!usableRows.length) return { notes: [], notices: [], parts: 0 };
   const glyphs = await recognizeGlyphs(usableRows, ink, canvas.width, worker, signal);
+  const crossed = row => rowDividers(row).length >= 2;
+  recoverMissingDigits(usableRows.filter(crossed), glyphs, ink, canvas.width);
   let musicRows = usableRows.map(row => ({
     ...row, numbers: row.digits.filter(box => /^[0-7]$/.test(glyphs.get(box)?.text ?? '')),
   })).filter(row => row.numbers.length >= 2 && row.numbers.length / row.digits.length >= 0.52);
-  const crossed = row => barlines.filter(mark => mark.y < row.y - row.h * 0.2 &&
-    mark.y + mark.h > row.y + row.h * 0.2).length >= 2;
+  const barredRows = musicRows.filter(crossed);
+  const rightEdge = row => rowDividers(row).reduce((right, mark) => Math.max(right, mark.cx), 0);
+  if (barredRows.some((row, index) => barredRows.slice(index + 1).some(other =>
+    Math.abs(rightEdge(row) - rightEdge(other)) < Math.min(row.h, other.h)))) {
+    musicRows = musicRows.filter(row => crossed(row) || row.numbers.some(box =>
+      underlineStrokes(box, ink, canvas.width, canvas.height).length) &&
+      row.numbers.filter(box => (glyphs.get(box)?.confidence ?? 0) >= 0.70 && glyphs.get(box)?.text !== '0').length >= 2);
+  }
   let systems = groupRows(musicRows, barlines);
   const paired = systems.filter(system => system.length > 1);
   if (paired.length >= 2) {
@@ -243,6 +308,12 @@ export async function recognizeJianpu(canvas, worker, signal, key, part) {
       paired.every(group => !group.some(row => Math.abs(row.y - system[0].y) < row.h * 3.2)));
   }
   const parts = Math.max(0, ...systems.map(system => system.length));
+  const underlines = new Map();
+  for (const row of musicRows) for (const box of row.numbers) {
+    underlines.set(box, underlineStrokes(box, ink, canvas.width, canvas.height));
+  }
+  const strokeWidths = [...underlines.values()].flat().sort((a, b) => a - b);
+  const singleStroke = strokeWidths[Math.floor(strokeWidths.length * 0.4)] ?? 1;
   const notes = [];
   let bar = 0;
   for (const system of systems) {
@@ -252,13 +323,15 @@ export async function recognizeJianpu(canvas, worker, signal, key, part) {
     const distances = digits.slice(1).map((box, i) => box.cx - digits[i].cx).sort((a, b) => a - b);
     const gap = distances[Math.floor(distances.length / 2)] ?? row.h;
     const rowMarks = boxes.filter(mark => Math.abs(mark.cy - row.y) < row.h * 1.57);
-    const dividers = barlines.filter(mark => !glyphs.has(mark) && mark.h >= row.h * 0.85 &&
-      mark.w / mark.h < 0.19 && mark.y < row.y && mark.y + mark.h > row.y).sort((a, b) => a.cx - b.cx);
+    const dividers = rowDividers(row).sort((a, b) => a.cx - b.cx);
     const dashes = rowMarks.filter(mark => mark.w >= row.h * 0.54 && mark.w / mark.h >= 3 &&
       Math.abs(mark.cy - row.y) < row.h * 0.27);
     for (const [index, box] of digits.entries()) {
       const { text, confidence } = glyphs.get(box);
-      const { beats, octave } = timingMarks(box, row, rowMarks, gap);
+      // The gap between two underlines can disappear when a score is photographed or compressed.
+      const fusedWidth = Math.max(4, row.h * 0.23, singleStroke * 1.75);
+      const underlineCount = underlines.get(box).reduce((sum, stroke) => sum + (stroke >= fusedWidth ? 2 : 1), 0);
+      const { beats, octave } = timingMarks(box, row, rowMarks, gap, underlineCount);
       const nextX = digits[index + 1]?.x ?? box.x + Math.max(row.h * 3, gap * 2);
       const divider = dividers.find(mark => mark.cx > box.cx && mark.cx < nextX);
       const extensions = dashes.filter(mark => mark.cx > box.x + box.w && mark.cx < (divider?.cx ?? nextX));
