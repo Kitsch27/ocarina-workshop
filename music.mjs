@@ -33,7 +33,11 @@ export function fingering(pitch, mode = 'normal', fingeringMode = 'simple') {
   if (shape.pad) controls.push(shape.pad > 0 ? layout.up : layout.down);
   if (shape.stick) controls.push(shape.stick > 0 ? '左摇杆 ↑' : '左摇杆 ↓');
   const button = layout.buttons[shape.root];
-  return { button, controls, text: [button, ...controls].join(' + ') };
+  return { button, controls, text: [...controls, button].join(' + ') };
+}
+
+export function controlSymbol(control) {
+  return control.replace('十字键 ', '').replace('左摇杆 ', '摇');
 }
 
 export function pitchName(midi) {
@@ -167,23 +171,6 @@ export function arrange(notes, { shift, mode, fold, fingeringMode = 'simple' }) 
 
 export function baseFingers(mode) {
   return ROOTS.map(pitch => ({ pitch, ...fingering(pitch, mode) }));
-}
-
-export function tablatureText(score, arranged, mode, shift, tempo, fingeringMode = 'simple') {
-  const rows = new Map();
-  for (const note of arranged) {
-    if (!rows.has(note.bar)) rows.set(note.bar, []);
-    const label = note.pitch == null ? '休止' : note.key?.text ?? `${pitchName(note.target)} 超出音域`;
-    const beats = Number(note.beats.toFixed(3));
-    rows.get(note.bar).push(`${label} [${pitchName(note.target)} · ${beats} 拍${note.octaveFold ? ' · 八度调整' : ''}]`);
-  }
-  return [
-    score.title, `Nintendo Switch 2《时之笛》 · ${LAYOUTS[mode].name}布局 · ${FINGERING_MODES[fingeringMode].name}指法 · ${tempo} BPM`,
-    `整体移调 ${shift > 0 ? '+' : ''}${shift} 半音 · 音名沿用指法表的记谱八度`,
-    '先按住升降音键，再按发音键。按谱面书写顺序演奏。', '',
-    ...[...rows.values()].map((notes, index) => `${index + 1}. ${notes.join('  /  ')}`),
-    '', '指法参考 https://github.com/diacoviello/LoZ-Ocarina-Note-Charts#quick-reference'
-  ].join('\n');
 }
 
 export const DEMO = {

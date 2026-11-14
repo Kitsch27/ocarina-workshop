@@ -8,8 +8,8 @@
   <meta name="description" content="上传五线谱或简谱，把旋律转换成 Nintendo Switch 2《时之笛》的按键谱。">
   <title>时之笛谱工坊</title>
   <link rel="icon" href="./assets/ocarina-nintendo.png" type="image/png">
-  <link rel="stylesheet" href="./styles.css?v=4">
-  <script type="module" src="./app.mjs?v=4"></script>
+  <link rel="stylesheet" href="./styles.css?v=5">
+  <script type="module" src="./app.mjs?v=5"></script>
 </head>
 <body id="top">
   <header class="site-header">
@@ -139,7 +139,8 @@
           </details>
           <div class="exports">
             <button class="button ghost" id="copy" type="button"><i class="icon" data-icon="copy"></i><span>复制</span></button>
-            <button class="button secondary" id="download" type="button"><i class="icon" data-icon="download"></i><span>下载按键谱</span></button>
+            <button class="button ghost" id="download" type="button"><i class="icon" data-icon="download"></i><span>下载 TXT</span></button>
+            <button class="button secondary" id="export-image" type="button"><i class="icon" data-icon="image"></i><span>导出图片</span></button>
           </div>
         </div>
         <p class="feedback" id="export-feedback" role="status" hidden></p>
@@ -165,7 +166,7 @@
             <span>左摇杆 ↑ / ↓</span><small>±2 半音</small>
             <span id="combined-guide" hidden>两种控制同向</span><small id="combined-semitones" hidden>±3 半音</small>
           </div>
-          <p>谱中「摇」表示左摇杆。先按住升降音键，再按发音键。</p>
+          <p>「摇↑」「摇↓」表示左摇杆。先按住谱上标出的升降音控制，再按发音键。</p>
         </div>
         <div class="guide-item">
           <h3><span class="diamond"></span>移调与音域</h3>
@@ -213,6 +214,16 @@
       <button class="button icon-only ghost" id="close-original" type="button" aria-label="关闭"><i class="icon" data-icon="x"></i></button>
     </div>
     <div id="original-image" class="editor-image"></div>
+  </dialog>
+
+  <dialog class="modal" id="image-export-dialog" aria-labelledby="image-export-title">
+    <div class="modal-head">
+      <h2 id="image-export-title">导出按键谱图片</h2>
+      <button class="button icon-only ghost" id="close-image-export" type="button" aria-label="关闭"><i class="icon" data-icon="x"></i></button>
+    </div>
+    <p class="editor-help">这份谱子已分页，点选要保存的页码。</p>
+    <div id="image-export-pages" class="image-export-pages"></div>
+    <p id="image-export-feedback" class="feedback" role="status" hidden></p>
   </dialog>
 </body>
 </html>

@@ -1,4 +1,5 @@
-import { arrange, baseFingers, chooseShift, DEMO, FINGERING_MODES, formatMelody, KINDS, LAYOUTS, mergeTies, parseMelody, pitchName, tablatureText } from './music.mjs?v=4';
+import { arrange, baseFingers, chooseShift, controlSymbol, DEMO, FINGERING_MODES, formatMelody, KINDS, LAYOUTS, mergeTies, parseMelody, pitchName } from './music.mjs?v=5';
+import { scoreExport, scoreImages, tablatureText } from './score-export.mjs?v=5';
 import { fileKind, MAX_FILE_BYTES, openMusicXML, openPdf, parsePages, readImage, readMusicXML, readPdfPage } from './score-files.mjs';
 
 const $ = id => document.getElementById(id);
@@ -58,14 +59,14 @@ function makeNoteButton(pitch, key, beats, octaveFold, confidence) {
     button.title += '，超出当前指法音域';
     button.setAttribute('aria-label', button.title);
   } else {
-    chip.textContent = key.button;
     chip.classList.add(`button-${key.button}`);
     if (key.controls.length) {
       const mods = document.createElement('span');
       mods.className = 'note-mods';
-      mods.textContent = key.controls.map(control => control.replace('十字键 ', '').replace('左摇杆 ', '摇')).join('·');
+      mods.textContent = `${key.controls.map(controlSymbol).join('+')}+`;
       chip.append(mods);
     }
+    chip.append(key.button);
   }
   if (octaveFold || confidence < 0.62) {
     const mark = document.createElement('span');
@@ -355,18 +356,28 @@ $('play').addEventListener('click', async () => {
   }
 });
 
-function exportText() {
-  return tablatureText(score, arranged, $('control-layout').value, shift, getTempo(), $('fingering-mode').value);
+function exportSource() {
+  const url = new URL(location.href);
+  url.hash = '';
+  url.search = '';
+  return scoreExport(score.title, collectBars(arranged), {
+    mode: $('control-layout').value, fingeringMode: $('fingering-mode').value, tempo: getTempo(), url: url.href,
+  });
+}
+
+function exportName(title) {
+  return `${title.replace(/[\\/:*?"<>|\x00-\x1f]/g, '_').trim().slice(0, 90)}-时之笛按键谱`;
 }
 
 $('copy').addEventListener('click', async () => {
+  const content = tablatureText(exportSource());
   try {
     if (!navigator.clipboard) throw new Error();
-    await navigator.clipboard.writeText(exportText());
+    await navigator.clipboard.writeText(content);
     feedback($('export-feedback'), '已复制按键谱。');
   } catch {
     const text = document.createElement('textarea');
-    text.value = exportText();
+    text.value = content;
     text.style.cssText = 'position:fixed;left:-9999px;top:0';
     document.body.append(text);
     text.select();
@@ -378,13 +389,62 @@ $('copy').addEventListener('click', async () => {
   }
 });
 
-$('download').addEventListener('click', () => {
-  const url = URL.createObjectURL(new Blob(['\uFEFF', exportText()], { type: 'text/plain;charset=utf-8' }));
+function downloadBlob(blob, name) {
+  const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `${score.title.replace(/[\\/:*?"<>|]/g, '_').slice(0, 90)}-时之笛按键谱.txt`;
+  a.download = name;
   a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1250);
+  setTimeout(() => URL.revokeObjectURL(url), 30000);
+}
+
+$('download').addEventListener('click', () => {
+  const source = exportSource();
+  downloadBlob(new Blob(['\uFEFF', tablatureText(source)], { type: 'text/plain;charset=utf-8' }), `${exportName(source.title)}.txt`);
+});
+
+const imageDialog = $('image-export-dialog');
+const imagePages = $('image-export-pages');
+$('close-image-export').addEventListener('click', () => imageDialog.close());
+imageDialog.addEventListener('close', () => imagePages.replaceChildren());
+$('export-image').addEventListener('click', async () => {
+  const button = $('export-image');
+  const source = exportSource();
+  button.disabled = true;
+  try {
+    await document.fonts?.ready;
+    const images = scoreImages(source);
+    const name = exportName(source.title);
+    if (images.count === 1) {
+      downloadBlob(await images.render(0), `${name}.png`);
+    } else {
+      for (let page = 0; page < images.count; page++) {
+        const pageButton = document.createElement('button');
+        pageButton.className = 'button secondary';
+        pageButton.type = 'button';
+        pageButton.textContent = `第 ${page + 1} 页 PNG`;
+        pageButton.addEventListener('click', async () => {
+          const buttons = [...imagePages.children];
+          buttons.forEach(item => { item.disabled = true; });
+          feedback($('image-export-feedback'), '');
+          try {
+            downloadBlob(await images.render(page), `${name}-${page + 1}.png`);
+          } catch {
+            feedback($('image-export-feedback'), '无法生成此页图片，请重试。', true);
+          } finally {
+            buttons.forEach(item => { item.disabled = false; });
+          }
+        });
+        imagePages.append(pageButton);
+      }
+      feedback($('image-export-feedback'), '');
+      imageDialog.showModal();
+    }
+  } catch {
+    feedback($('export-feedback'), '无法生成图片，请重试。', true);
+  } finally {
+    button.disabled = false;
+  }
 });
 
 function freePanel(container) {
