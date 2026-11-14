@@ -213,7 +213,7 @@ input[type="checkbox"] { accent-color: var(--gold); }
 .modifier-list { display: grid; grid-template-columns: minmax(65px, auto) 1fr; column-gap: 10px; margin-top: 11px; font-size: 12px; }
 .modifier-list small { color: #c7b678; font-size: inherit; }
 .range-display { font: 600 22px/1.55 Cinzel, Georgia, serif; color: var(--amber); margin-top: 6px; }
-.range-display span { color: #80774f; padding-inline: 5px; }
+.range-separator { color: #80774f; padding-inline: 5px; }
 .site-footer {
   margin-top: 20px; padding: 17px 1px 24px; border-top: 1px solid #414b39; color: #aab09d; font-size: 11px;
 }

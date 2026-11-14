@@ -3,7 +3,10 @@ const CHROMATIC = ['C', 'C♯', 'D', 'E♭', 'E', 'F', 'F♯', 'G', 'A♭', 'A',
 const MAJOR = [0, 2, 4, 5, 7, 9, 11];
 const ROOTS = [62, 65, 69, 71, 74];
 
-export const RANGE = [59, 77];
+export const FINGERING_MODES = {
+  simple: { name: '简易', range: [60, 76], allowCombined: false },
+  full: { name: '完整', range: [59, 77], allowCombined: true },
+};
 export const LAYOUTS = {
   normal: { name: '标准', buttons: ['L', 'R', 'A', 'Y', 'X'], up: '十字键 ↑', down: '十字键 ↓' },
   classic: { name: '经典', buttons: ['R', 'B', 'A', 'X', 'Y'], up: 'L', down: 'ZL' },
@@ -22,9 +25,9 @@ for (const [difficulty, mod] of steps.entries()) {
   }
 }
 
-export function fingering(pitch, mode = 'normal') {
+export function fingering(pitch, mode = 'normal', fingeringMode = 'simple') {
   const shape = fingerings.get(pitch);
-  if (!shape) return null;
+  if (!shape || (!FINGERING_MODES[fingeringMode].allowCombined && shape.pad && shape.stick)) return null;
   const layout = LAYOUTS[mode] ?? LAYOUTS.normal;
   const controls = [];
   if (shape.pad) controls.push(shape.pad > 0 ? layout.up : layout.down);
@@ -121,26 +124,28 @@ export function mergeTies(notes) {
   return merged;
 }
 
-function foldPitch(pitch) {
-  const [low, high] = RANGE;
+function foldPitch(pitch, [low, high]) {
   if (pitch < low) return pitch + 12 * Math.ceil((low - pitch) / 12);
   if (pitch > high) return pitch - 12 * Math.ceil((pitch - high) / 12);
   return pitch;
 }
 
-export function chooseShift(notes) {
+export function chooseShift(notes, fingeringMode = 'simple') {
   const live = notes.filter(note => note.pitch != null);
   if (!live.length) return 0;
   const pitches = live.map(note => note.pitch);
-  const start = RANGE[0] - Math.max(...pitches);
-  const end = RANGE[1] - Math.min(...pitches);
+  const range = FINGERING_MODES[fingeringMode].range;
+  const [low, high] = range;
+  const start = low - Math.max(...pitches);
+  const end = high - Math.min(...pitches);
   let bestCost = Infinity;
   let bestShift = 0;
   for (let shift = start; shift <= end; shift++) {
     let cost = Math.abs(shift) * 0.016 + (shift % 12 === 0 ? 0 : 0.22);
     for (const pitch of pitches) {
-      const fit = fingerings.get(pitch + shift);
-      cost += fit ? fit.difficulty / pitches.length : 12 + Math.abs(foldPitch(pitch + shift) - (pitch + shift)) * 0.01;
+      const target = pitch + shift;
+      const fit = target >= low && target <= high ? fingerings.get(target) : null;
+      cost += fit ? fit.difficulty / pitches.length : 12 + Math.abs(foldPitch(target, range) - target) * 0.01;
     }
     if (cost < bestCost) {
       bestCost = cost;
@@ -150,12 +155,13 @@ export function chooseShift(notes) {
   return bestShift;
 }
 
-export function arrange(notes, { shift, mode, fold }) {
+export function arrange(notes, { shift, mode, fold, fingeringMode = 'simple' }) {
+  const range = FINGERING_MODES[fingeringMode].range;
   return notes.map(note => {
     if (note.pitch == null) return { ...note, target: null, key: null, octaveFold: false };
     const shifted = note.pitch + shift;
-    const target = fold ? foldPitch(shifted) : shifted;
-    return { ...note, target, key: fingering(target, mode), octaveFold: shifted !== target };
+    const target = fold ? foldPitch(shifted, range) : shifted;
+    return { ...note, target, key: fingering(target, mode, fingeringMode), octaveFold: shifted !== target };
   });
 }
 
@@ -163,7 +169,7 @@ export function baseFingers(mode) {
   return ROOTS.map(pitch => ({ pitch, ...fingering(pitch, mode) }));
 }
 
-export function tablatureText(score, arranged, mode, shift, tempo) {
+export function tablatureText(score, arranged, mode, shift, tempo, fingeringMode = 'simple') {
   const rows = new Map();
   for (const note of arranged) {
     if (!rows.has(note.bar)) rows.set(note.bar, []);
@@ -172,7 +178,7 @@ export function tablatureText(score, arranged, mode, shift, tempo) {
     rows.get(note.bar).push(`${label} [${pitchName(note.target)} · ${beats} 拍${note.octaveFold ? ' · 八度调整' : ''}]`);
   }
   return [
-    score.title, `Nintendo Switch 2《时之笛》 · ${LAYOUTS[mode].name}布局 · ${tempo} BPM`,
+    score.title, `Nintendo Switch 2《时之笛》 · ${LAYOUTS[mode].name}布局 · ${FINGERING_MODES[fingeringMode].name}指法 · ${tempo} BPM`,
     `整体移调 ${shift > 0 ? '+' : ''}${shift} 半音 · 音名沿用指法表的记谱八度`,
     '先按住升降音键，再按发音键。按谱面书写顺序演奏。', '',
     ...[...rows.values()].map((notes, index) => `${index + 1}. ${notes.join('  /  ')}`),

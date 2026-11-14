@@ -8,8 +8,8 @@
   <meta name="description" content="上传五线谱或简谱，把旋律转换成 Nintendo Switch 2《时之笛》的按键谱。">
   <title>时之笛谱工坊</title>
   <link rel="icon" href="./assets/ocarina-nintendo.png" type="image/png">
-  <link rel="stylesheet" href="./styles.css?v=3">
-  <script type="module" src="./app.mjs?v=3"></script>
+  <link rel="stylesheet" href="./styles.css?v=4">
+  <script type="module" src="./app.mjs?v=4"></script>
 </head>
 <body id="top">
   <header class="site-header">
@@ -128,6 +128,8 @@
             <div class="settings-popover">
               <label for="control-layout">游戏按键布局</label>
               <select id="control-layout"><option value="normal">标准</option><option value="classic">经典</option></select>
+              <label for="fingering-mode">指法模式</label>
+              <select id="fingering-mode"><option value="simple">简易（默认）</option><option value="full">完整（允许组合）</option></select>
               <label for="transposition">整体移调</label>
               <select id="transposition"><option value="auto">自动选择</option><option value="0">原调</option></select>
               <label for="tempo">试听速度</label>
@@ -161,12 +163,13 @@
           <div class="modifier-list">
             <span id="pad-guide">十字键 ↑ / ↓</span><small>±1 半音</small>
             <span>左摇杆 ↑ / ↓</span><small>±2 半音</small>
+            <span id="combined-guide" hidden>两种控制同向</span><small id="combined-semitones" hidden>±3 半音</small>
           </div>
           <p>谱中「摇」表示左摇杆。先按住升降音键，再按发音键。</p>
         </div>
         <div class="guide-item">
           <h3><span class="diamond"></span>移调与音域</h3>
-          <div class="range-display">B3 <span>—</span> F5</div>
+          <div class="range-display"><span id="range-low">C4</span> <span class="range-separator">—</span> <span id="range-high">E5</span></div>
           <p>自动移调优先保持音程。单独移八度的音会用 * 标记。</p>
         </div>
       </div>

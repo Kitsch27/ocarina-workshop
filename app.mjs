@@ -1,4 +1,4 @@
-import { arrange, baseFingers, chooseShift, DEMO, formatMelody, KINDS, LAYOUTS, mergeTies, parseMelody, pitchName, tablatureText } from './music.mjs?v=3';
+import { arrange, baseFingers, chooseShift, DEMO, FINGERING_MODES, formatMelody, KINDS, LAYOUTS, mergeTies, parseMelody, pitchName, tablatureText } from './music.mjs?v=4';
 import { fileKind, MAX_FILE_BYTES, openMusicXML, openPdf, parsePages, readImage, readMusicXML, readPdfPage } from './score-files.mjs';
 
 const $ = id => document.getElementById(id);
@@ -23,7 +23,6 @@ const panelUrls = new Map();
 let score = DEMO;
 let arranged = [];
 let shift = 0;
-let suggestedShift = 0;
 let audio = null;
 let playback = null;
 let currentNote = null;
@@ -56,7 +55,7 @@ function makeNoteButton(pitch, key, beats, octaveFold, confidence) {
   } else if (!key) {
     chip.textContent = '!';
     chip.classList.add('unplayable');
-    button.title += '，超出时之笛音域';
+    button.title += '，超出当前指法音域';
     button.setAttribute('aria-label', button.title);
   } else {
     chip.textContent = key.button;
@@ -100,12 +99,17 @@ function setPlaybackStart(index) {
   $('reset-playback-start').hidden = index === null;
 }
 
-function renderScore() {
+function renderScore({ resetFold = false } = {}) {
   stopPlayback();
   const mode = $('control-layout').value;
+  const fingeringMode = $('fingering-mode').value;
+  const { name, range: [low, high] } = FINGERING_MODES[fingeringMode];
   const requested = $('transposition').value;
-  shift = requested === 'auto' ? suggestedShift : Number(requested);
-  arranged = arrange(score.notes, { mode, shift, fold: $('fold').checked });
+  shift = requested === 'auto' ? chooseShift(score.notes, fingeringMode) : Number(requested);
+  if (resetFold) {
+    $('fold').checked = score.notes.some(({ pitch }) => pitch != null && (pitch + shift < low || pitch + shift > high));
+  }
+  arranged = arrange(score.notes, { mode, shift, fingeringMode, fold: $('fold').checked });
   $('score-kind').textContent = score.kind === 'demo' ? '示例' : KINDS[score.kind];
   $('score-name').textContent = score.title;
   const bars = collectBars(arranged);
@@ -113,7 +117,7 @@ function renderScore() {
   const folded = arranged.filter(note => note.octaveFold).length;
   const uncertain = arranged.some(note => note.confidence < 0.62);
   const offset = shift === 0 ? '原调' : `${shift > 0 ? '+' : '−'}${Math.abs(shift)} 半音`;
-  $('score-meta').textContent = `${bars.size} 小节 · ${arranged.filter(note => note.pitch != null).length} 个音符 · ${offset} · ${LAYOUTS[mode].name}布局`;
+  $('score-meta').textContent = `${bars.size} 小节 · ${arranged.filter(note => note.pitch != null).length} 个音符 · ${offset} · ${LAYOUTS[mode].name}布局 · ${name}指法`;
 
   const rowElements = [];
   noteButtons = [];
@@ -143,7 +147,7 @@ function renderScore() {
   }
   $('bars').replaceChildren(...rowElements);
   const messages = [...(score.notices ?? [])];
-  if (outOfRange) messages.push(`${outOfRange} 个音超出音域，可在演奏设置中调整移调或八度。试听时这些音保留为停顿。`);
+  if (outOfRange) messages.push(`${outOfRange} 个音超出当前指法音域，可在演奏设置中调整移调或八度。试听时这些音保留为停顿。`);
   if (folded || uncertain) messages.push(`* 标记${[folded ? `已移八度的 ${folded} 个音` : '', uncertain ? '需要校对的音' : ''].filter(Boolean).join('和')}。`);
   $('result-feedback').textContent = messages.join(' ');
   $('result-feedback').hidden = !messages.length;
@@ -153,20 +157,18 @@ function renderScore() {
 function showScore(result, scroll = true, keepSettings = false) {
   score = result;
   setPlaybackStart(null);
-  suggestedShift = chooseShift(result.notes);
   if (!keepSettings) {
     $('tempo').value = Math.min(240, Math.max(30, Math.round(result.tempo || 96)));
     $('transposition').value = 'auto';
-    const fitted = arrange(result.notes, { shift: suggestedShift, mode: 'normal', fold: false });
-    $('fold').checked = fitted.some(note => note.pitch != null && !note.key);
   }
-  renderScore();
+  renderScore({ resetFold: !keepSettings });
   $('bars').scrollTop = 0;
   if (scroll && matchMedia('(max-width: 770px)').matches) $('result').scrollIntoView({ block: 'start' });
 }
 
 function renderGuide() {
   const mode = $('control-layout').value;
+  const { range: [low, high], allowCombined } = FINGERING_MODES[$('fingering-mode').value];
   const buttons = baseFingers(mode).map(key => {
     const button = makeNoteButton(key.pitch, key, 1, false);
     button.querySelector('.note-pitch').textContent = pitchName(key.pitch);
@@ -178,6 +180,9 @@ function renderGuide() {
   });
   $('base-notes').replaceChildren(...buttons);
   $('pad-guide').textContent = mode === 'classic' ? 'L 升音 / ZL 降音' : '十字键 ↑ / ↓';
+  $('combined-guide').hidden = $('combined-semitones').hidden = !allowCombined;
+  $('range-low').textContent = pitchName(low);
+  $('range-high').textContent = pitchName(high);
 }
 
 const shiftSelect = $('transposition');
@@ -185,9 +190,9 @@ for (let offset = -48; offset <= 48; offset++) {
   if (!offset) continue;
   shiftSelect.add(new Option(`${offset > 0 ? '+' : '−'}${Math.abs(offset)} 半音`, String(offset)));
 }
-for (const id of ['control-layout', 'transposition', 'fold']) {
+for (const id of ['control-layout', 'fingering-mode', 'transposition', 'fold']) {
   $(id).addEventListener('change', () => {
-    if (id === 'control-layout') renderGuide();
+    if (id === 'control-layout' || id === 'fingering-mode') renderGuide();
     renderScore();
   });
 }
@@ -351,7 +356,7 @@ $('play').addEventListener('click', async () => {
 });
 
 function exportText() {
-  return tablatureText(score, arranged, $('control-layout').value, shift, getTempo());
+  return tablatureText(score, arranged, $('control-layout').value, shift, getTempo(), $('fingering-mode').value);
 }
 
 $('copy').addEventListener('click', async () => {
