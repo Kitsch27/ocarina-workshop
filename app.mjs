@@ -1,4 +1,4 @@
-import { arrange, baseFingers, chooseShift, DEMO, formatMelody, KINDS, LAYOUTS, mergeTies, parseMelody, pitchName, tablatureText } from './music.mjs';
+import { arrange, baseFingers, chooseShift, DEMO, formatMelody, KINDS, LAYOUTS, mergeTies, parseMelody, pitchName, tablatureText } from './music.mjs?v=3';
 import { fileKind, MAX_FILE_BYTES, openMusicXML, openPdf, parsePages, readImage, readMusicXML, readPdfPage } from './score-files.mjs';
 
 const $ = id => document.getElementById(id);
@@ -8,7 +8,6 @@ const recognitionType = $('score-type');
 const partSelect = $('source-part');
 const editor = $('edit-dialog');
 const original = $('original-dialog');
-const tabs = [...document.querySelectorAll('.nav-link')];
 const MAX_NOTES = 1200;
 
 function setIcon(element, name) {
@@ -29,6 +28,7 @@ let audio = null;
 let playback = null;
 let currentNote = null;
 let noteButtons = [];
+let startIndex = null;
 let manual = false;
 
 function feedback(element, message, error = false) {
@@ -36,16 +36,6 @@ function feedback(element, message, error = false) {
   element.classList.toggle('error', error);
   element.hidden = !message;
 }
-
-function updateNavigation() {
-  const guide = location.hash === '#guide';
-  for (const tab of tabs) {
-    if ((tab.hash === '#guide') === guide) tab.setAttribute('aria-current', 'location');
-    else tab.removeAttribute('aria-current');
-  }
-}
-window.addEventListener('hashchange', updateNavigation);
-updateNavigation();
 
 function makeNoteButton(pitch, key, beats, octaveFold, confidence) {
   const button = document.createElement('button');
@@ -102,6 +92,14 @@ function collectBars(notes) {
   return bars;
 }
 
+function setPlaybackStart(index) {
+  noteButtons[startIndex]?.setAttribute('aria-pressed', 'false');
+  startIndex = index;
+  noteButtons[startIndex]?.setAttribute('aria-pressed', 'true');
+  $('playback-start').textContent = index === null ? '点击谱上的音符选择试听起点' : `试听从第 ${index + 1} 格开始`;
+  $('reset-playback-start').hidden = index === null;
+}
+
 function renderScore() {
   stopPlayback();
   const mode = $('control-layout').value;
@@ -131,8 +129,10 @@ function renderScore() {
     notes.className = 'notes';
     for (const { note, index } of group) {
       const key = makeNoteButton(note.target, note.key, note.beats, note.octaveFold, note.confidence);
+      key.setAttribute('aria-pressed', String(index === startIndex));
       key.addEventListener('click', () => {
         stopPlayback();
+        setPlaybackStart(index);
         if (note.key) void playSingle(note.target, key);
       });
       noteButtons[index] = key;
@@ -142,7 +142,6 @@ function renderScore() {
     rowElements.push(row);
   }
   $('bars').replaceChildren(...rowElements);
-  $('bars').scrollTop = 0;
   const messages = [...(score.notices ?? [])];
   if (outOfRange) messages.push(`${outOfRange} 个音超出音域，可在演奏设置中调整移调或八度。试听时这些音保留为停顿。`);
   if (folded || uncertain) messages.push(`* 标记${[folded ? `已移八度的 ${folded} 个音` : '', uncertain ? '需要校对的音' : ''].filter(Boolean).join('和')}。`);
@@ -153,6 +152,7 @@ function renderScore() {
 
 function showScore(result, scroll = true, keepSettings = false) {
   score = result;
+  setPlaybackStart(null);
   suggestedShift = chooseShift(result.notes);
   if (!keepSettings) {
     $('tempo').value = Math.min(240, Math.max(30, Math.round(result.tempo || 96)));
@@ -161,6 +161,7 @@ function showScore(result, scroll = true, keepSettings = false) {
     $('fold').checked = fitted.some(note => note.pitch != null && !note.key);
   }
   renderScore();
+  $('bars').scrollTop = 0;
   if (scroll && matchMedia('(max-width: 770px)').matches) $('result').scrollIntoView({ block: 'start' });
 }
 
@@ -289,10 +290,18 @@ async function playSingle(pitch, button) {
   }
 }
 
+$('reset-playback-start').addEventListener('click', () => {
+  stopPlayback();
+  setPlaybackStart(null);
+  $('bars').scrollTop = 0;
+  $('play').focus();
+});
+
 $('play').addEventListener('click', async () => {
   if (playback?.song) { stopPlayback(); return; }
   stopPlayback();
   const state = { voices: [], song: true };
+  const first = startIndex ?? 0;
   playback = state;
   setPlaying(true);
   try {
@@ -300,7 +309,7 @@ $('play').addEventListener('click', async () => {
     if (playback !== state) return;
     const secondsPerBeat = 60 / getTempo();
     let time = context.currentTime + 0.065;
-    const timeline = arranged.map(note => {
+    const timeline = arranged.slice(first).map(note => {
       const start = time;
       time += note.beats * secondsPerBeat;
       return { start, end: time, note };
@@ -328,7 +337,7 @@ $('play').addEventListener('click', async () => {
       const now = context.currentTime;
       while (activeIndex + 1 < timeline.length && timeline[activeIndex + 1].start <= now) activeIndex++;
       if (now >= time + 0.12) { stopPlayback(); return; }
-      active(noteButtons[activeIndex], true);
+      if (activeIndex >= 0) active(noteButtons[first + activeIndex], true);
       state.frame = requestAnimationFrame(highlight);
     };
     schedule();

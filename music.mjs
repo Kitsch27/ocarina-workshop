@@ -181,9 +181,9 @@ export function tablatureText(score, arranged, mode, shift, tempo) {
 }
 
 export const DEMO = {
-  title: '欢乐颂',
-  notes: parseMelody('E4 E4 F4 G4 | G4 F4 E4 D4 | C4 C4 D4 E4 | E4:1.5 D4:0.5 D4:2'),
-  tempo: 96,
+  title: '塞尔达摇篮曲',
+  notes: parseMelody('B4 D5 A4:2 | B4 D5 A4:2'),
+  tempo: 76,
   kind: 'demo',
   notices: [],
 };

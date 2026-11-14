@@ -4,6 +4,8 @@
 
 打开网页后，选择乐谱并点击「识别并转谱」。支持常见图片、PDF 和 MusicXML。识谱和音符转换在访客的浏览器内运行。用「校对」检查音高和拍数，选择游戏里的按键布局，然后试听或下载 TXT 按键谱。
 
+「试用示例」载入《塞尔达摇篮曲》。点击按键谱里的音符选定起点，再点「试听」即可从那里播放。点击「回到开头」可恢复从头播放。
+
 ## 部署
 
 把仓库根目录设为 GitHub Pages 的发布来源。在 **Settings → Pages** 里选择 **Deploy from a branch**，然后选择 `main` 和 `/(root)`。页面和识谱模型都已包含在仓库里。
@@ -15,3 +17,7 @@
 按键换算沿用玩家指法表的记谱八度。[LoZ Ocarina Note Charts](https://github.com/diacoviello/LoZ-Ocarina-Note-Charts#quick-reference)
 
 网站页脚的「来源与识谱说明」列出了开源组件及各自的许可。
+
+制作 · [Kitsch27](https://github.com/Kitsch27) 与 Codex。
+
+Ocarina Workshop is an unofficial fan project, not affiliated with or endorsed by Nintendo. The Legend of Zelda and Ocarina of Time are trademarks of Nintendo.
