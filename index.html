@@ -8,8 +8,8 @@
   <meta name="description" content="上传乐谱或音频，把旋律转换成 Nintendo Switch 2《时之笛》的按键谱。">
   <title>时之笛谱工坊</title>
   <link rel="icon" href="./assets/ocarina-nintendo.png" type="image/png">
-  <link rel="stylesheet" href="./styles.css?v=14">
-  <script type="module" src="./app.mjs?v=14"></script>
+  <link rel="stylesheet" href="./styles.css?v=15">
+  <script type="module" src="./app.mjs?v=15"></script>
 </head>
 <body id="top">
   <header class="site-header">
@@ -132,7 +132,7 @@
             </div>
             <form id="note-editor" hidden>
               <div class="note-fields">
-                <label for="note-edit-pitch">原谱音高<select id="note-edit-pitch"></select></label>
+                <label for="note-edit-pitch">演奏音高<select id="note-edit-pitch" required></select></label>
                 <label for="note-edit-beats">拍数<input id="note-edit-beats" type="number" min="0.01" max="128" step="any" inputmode="decimal" required></label>
               </div>
               <div class="score-edit-actions">
@@ -142,10 +142,7 @@
               </div>
             </form>
             <details class="pitch-preview">
-              <summary>试听所有音高</summary>
-              <div class="note-fields">
-                <label for="pitch-preview-octave">八度<select id="pitch-preview-octave"></select></label>
-              </div>
+              <summary>试听可演奏音高</summary>
               <div class="pitch-preview-notes" id="pitch-preview-notes" role="group" aria-label="可试听音高"></div>
             </details>
             <p class="result-feedback" id="note-edit-feedback" role="status" hidden></p>

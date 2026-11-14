@@ -1,4 +1,4 @@
-import { arrange, baseFingers, chooseShift, controlSymbol, DEMO, FINGERING_MODES, formatMelody, KINDS, LAYOUTS, mergeTies, parseMelody, pitchName } from './music.mjs?v=8';
+import { arrange, baseFingers, chooseShift, controlSymbol, DEMO, fingering, FINGERING_MODES, formatMelody, KINDS, LAYOUTS, mergeTies, parseMelody, pitchName } from './music.mjs?v=8';
 import { scoreExport, scoreImages, tablatureText } from './score-export.mjs?v=6';
 import { fileKind, MAX_FILE_BYTES, openMusicXML, openPdf, parsePages, readImage, readMusicXML, readPdfPage } from './score-files.mjs?v=9';
 
@@ -50,8 +50,9 @@ function makeNoteButton(pitch, key, beats, octaveFold, confidence) {
   const label = document.createElement('span');
   label.className = 'note-pitch';
   const name = pitchName(pitch);
-  label.textContent = pitch == null ? `休 · ${prettyBeats(beats)}` : `${name} · ${prettyBeats(beats)}`;
-  const description = [name, key?.text, `${prettyBeats(beats)} 拍`, octaveFold ? '已单独移八度' : '', confidence < 0.62 ? '请校对' : ''].filter(Boolean).join('，');
+  const duration = beats == null ? '' : prettyBeats(beats);
+  label.textContent = beats == null ? name : `${pitch == null ? '休' : name} · ${duration}`;
+  const description = [name, key?.text, beats == null ? '' : `${duration} 拍`, octaveFold ? '已单独移八度' : '', confidence < 0.62 ? '请校对' : ''].filter(Boolean).join('，');
   button.title = description;
   button.setAttribute('aria-label', description);
   if (pitch == null) {
@@ -109,10 +110,6 @@ function renderScore({ resetFold = false } = {}) {
   const mode = $('control-layout').value;
   const fingeringMode = $('fingering-mode').value;
   const { name, range: [low, high] } = FINGERING_MODES[fingeringMode];
-  const requested = $('transposition').value;
-  if (!editingScore || requested !== 'auto') {
-    shift = requested === 'auto' ? chooseShift(score.notes, fingeringMode) : Number(requested);
-  }
   if (resetFold) {
     $('fold').checked = score.notes.some(({ pitch }) => pitch != null && (pitch + shift < low || pitch + shift > high));
   }
@@ -174,6 +171,7 @@ function showScore(result, scroll = true, keepSettings = false) {
     $('tempo').value = Math.min(240, Math.max(30, Math.round(result.tempo || 96)));
     $('transposition').value = 'auto';
   }
+  if ($('transposition').value === 'auto') shift = chooseShift(score.notes, $('fingering-mode').value);
   renderScore({ resetFold: !keepSettings });
   $('bars').scrollTop = 0;
   if (scroll && matchMedia('(max-width: 770px)').matches) $('result').scrollIntoView({ block: 'start' });
@@ -182,45 +180,55 @@ function showScore(result, scroll = true, keepSettings = false) {
 const notePitch = $('note-edit-pitch');
 const noteBeats = $('note-edit-beats');
 const noteEditFeedback = $('note-edit-feedback');
-const pitchPreviewOctave = $('pitch-preview-octave');
 const pitchPreviewNotes = $('pitch-preview-notes');
 const MAX_MIDI_PITCH = 127;
-notePitch.add(new Option('休止符', 'rest'));
-for (let pitch = 0; pitch <= MAX_MIDI_PITCH; pitch++) notePitch.add(new Option(pitchName(pitch), String(pitch)));
 
-function selectedPitch() {
-  return notePitch.value === 'rest' ? null : Number(notePitch.value);
+function editablePitchValue() {
+  const note = arranged[editIndex];
+  if (!note) return '';
+  if (note.target === null) return 'rest';
+  return note.key ? String(note.target) : '';
 }
 
 notePitch.addEventListener('change', () => {
-  void playSingle(selectedPitch(), null, noteEditFeedback);
+  const value = notePitch.value;
+  void playSingle(value && value !== 'rest' ? Number(value) : null, null, noteEditFeedback);
 });
 
-function renderPitchPreview() {
-  const first = 12 * (Number(pitchPreviewOctave.value) + 1);
-  const last = Math.min(first + 11, MAX_MIDI_PITCH);
+function renderPitchChoices() {
+  const mode = $('control-layout').value;
+  const fingeringMode = $('fingering-mode').value;
+  const fold = $('fold').checked;
+  const [low, high] = FINGERING_MODES[fingeringMode].range;
+  const placeholder = new Option('请选择演奏音高', '');
+  placeholder.disabled = true;
+  const options = [placeholder, new Option('休止符', 'rest')];
   const buttons = [];
-  for (let pitch = first; pitch <= last; pitch++) {
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = 'button';
-    button.textContent = pitchName(pitch);
+  for (let pitch = low; pitch <= high; pitch++) {
+    const key = fingering(pitch, mode, fingeringMode);
+    if (!key) continue;
+    let sourcePitch = pitch - shift;
+    if (fold && (sourcePitch < 0 || sourcePitch > MAX_MIDI_PITCH)) {
+      // Choose the closest valid source octave, and verify it folds to this exact pitch.
+      const nearest = Math.min(MAX_MIDI_PITCH, Math.max(0, sourcePitch));
+      sourcePitch += 12 * (sourcePitch < 0 ? Math.ceil((nearest - sourcePitch) / 12) : Math.floor((nearest - sourcePitch) / 12));
+      const [mapped] = arrange([{ pitch: sourcePitch }], { mode, shift, fingeringMode, fold });
+      if (mapped.target !== pitch) sourcePitch = -1;
+    }
+    if (sourcePitch >= 0 && sourcePitch <= MAX_MIDI_PITCH) {
+      const option = new Option(pitchName(pitch), String(pitch));
+      option.dataset.sourcePitch = sourcePitch;
+      options.push(option);
+    }
+    const button = makeNoteButton(pitch, key);
     button.addEventListener('click', () => { void playSingle(pitch, button, noteEditFeedback); });
     buttons.push(button);
   }
+  notePitch.replaceChildren(...options);
   pitchPreviewNotes.replaceChildren(...buttons);
 }
 
-for (let pitch = 0; pitch <= MAX_MIDI_PITCH; pitch += 12) {
-  const octave = pitch / 12 - 1;
-  const last = Math.min(pitch + 11, MAX_MIDI_PITCH);
-  pitchPreviewOctave.add(new Option(`${pitchName(pitch)} – ${pitchName(last)}`, String(octave)));
-}
-pitchPreviewOctave.value = '4';
-pitchPreviewOctave.addEventListener('change', renderPitchPreview);
-renderPitchPreview();
-
-function selectEditableNote(index) {
+function selectEditableNote(index, draftPitch, draftBeats) {
   noteButtons[editIndex]?.setAttribute('aria-pressed', 'false');
   editIndex = index;
   const note = score.notes[index];
@@ -235,9 +243,12 @@ function selectEditableNote(index) {
   const bars = collectBars(score.notes);
   const bar = [...bars.keys()].indexOf(note.bar) + 1;
   const position = bars.get(note.bar).findIndex(item => item.index === index) + 1;
-  $('note-selection').textContent = '第 ' + bar + ' 小节 · 第 ' + position + ' 格 · ' + pitchName(note.pitch);
-  notePitch.value = note.pitch === null ? 'rest' : String(note.pitch);
-  noteBeats.value = note.beats;
+  const pitch = editablePitchValue();
+  const description = pitch ? `原谱 ${pitchName(note.pitch)}` : `原谱 ${pitchName(note.pitch)}（无可用指法）`;
+  $('note-selection').textContent = `第 ${bar} 小节 · 第 ${position} 格 · ${description}`;
+  notePitch.value = draftPitch ?? pitch;
+  if (notePitch.selectedIndex < 0) notePitch.value = '';
+  noteBeats.value = draftBeats ?? note.beats;
   // Older imports can contain durations larger than the manual-entry limit.
   noteBeats.max = Math.max(128, note.beats);
   $('insert-note').disabled = score.notes.length >= MAX_NOTES;
@@ -256,6 +267,7 @@ function setScoreEditing(enabled) {
   $('undo-note').disabled = !noteHistory.length;
   $('play').setAttribute('aria-describedby', enabled ? 'note-selection' : 'playback-start');
   if (enabled) {
+    renderPitchChoices();
     noteButtons[startIndex]?.setAttribute('aria-pressed', 'false');
     selectEditableNote(startIndex ?? 0);
   } else {
@@ -285,7 +297,11 @@ function editNote(action) {
     notes.splice(index, 1);
     index = Math.min(index, notes.length - 1);
   } else {
-    const pitch = selectedPitch();
+    const value = notePitch.value;
+    if (!value) return;
+    // Keep the imported octave when saving a note whose sounding pitch has not changed.
+    const sourcePitch = value === 'rest' ? null : Number(notePitch.selectedOptions[0].dataset.sourcePitch);
+    const pitch = action === 'save' && value === editablePitchValue() ? current.pitch : sourcePitch;
     const beats = Number(noteBeats.value);
     const note = { pitch, beats, bar: current.bar };
     if (action === 'insert') {
@@ -319,8 +335,7 @@ function renderGuide() {
   const mode = $('control-layout').value;
   const { range: [low, high], allowCombined } = FINGERING_MODES[$('fingering-mode').value];
   const buttons = baseFingers(mode).map(key => {
-    const button = makeNoteButton(key.pitch, key, 1, false);
-    button.querySelector('.note-pitch').textContent = pitchName(key.pitch);
+    const button = makeNoteButton(key.pitch, key);
     button.addEventListener('click', () => { void playSingle(key.pitch, button); });
     return button;
   });
@@ -338,11 +353,18 @@ for (let offset = -48; offset <= 48; offset++) {
 }
 for (const id of ['control-layout', 'fingering-mode', 'transposition', 'fold']) {
   $(id).addEventListener('change', () => {
+    const draftPitch = editingScore && notePitch.value !== editablePitchValue() ? notePitch.value : undefined;
     if (id === 'control-layout' || id === 'fingering-mode') renderGuide();
-    if ($('transposition').value === 'auto' && (id === 'fingering-mode' || id === 'transposition')) {
-      shift = chooseShift(score.notes, $('fingering-mode').value);
+    if (id === 'fingering-mode' || id === 'transposition') {
+      const requested = $('transposition').value;
+      shift = requested === 'auto' ? chooseShift(score.notes, $('fingering-mode').value) : Number(requested);
     }
     renderScore();
+    if (editingScore) {
+      const draftBeats = noteBeats.value;
+      renderPitchChoices();
+      selectEditableNote(editIndex, draftPitch, draftBeats);
+    }
   });
 }
 $('tempo').addEventListener('change', () => { $('tempo').value = getTempo(); stopPlayback(); });

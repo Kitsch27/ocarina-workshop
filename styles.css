@@ -197,10 +197,7 @@ select { appearance: none; padding-right: 26px; background-image: url('./assets/
 .score-edit-tools :focus-visible { outline-color: #395e41; outline-offset: 2px; }
 .pitch-preview { margin-top: 8px; }
 .pitch-preview summary { width: fit-content; padding: 6px 0; cursor: pointer; color: #294c37; font-size: 12px; font-weight: 700; }
-.pitch-preview .note-fields { margin-top: 4px; }
-.pitch-preview-notes { display: grid; grid-template-columns: repeat(auto-fit, minmax(39px, 1fr)); gap: 5px; margin-top: 6px; }
-.pitch-preview-notes .button { justify-content: center; font-variant-numeric: tabular-nums; }
-.pitch-preview-notes .button.active { background: #294c37; border-color: #294c37; color: #fff1cb; }
+.pitch-preview-notes { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
 .result-feedback { font-size: 11px; border-top: 1px solid #b6a16a82; color: #643b22; padding-top: 6px; margin-top: 6px; }
 .output-tools { margin-top: 12px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
 .exports { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 7px; margin-left: auto; }
