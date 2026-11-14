@@ -9,7 +9,7 @@
   <title>时之笛谱工坊</title>
   <link rel="icon" href="./assets/ocarina-nintendo.png" type="image/png">
   <link rel="stylesheet" href="./styles.css?v=15">
-  <script type="module" src="./app.mjs?v=15"></script>
+  <script type="module" src="./app.mjs?v=16"></script>
 </head>
 <body id="top">
   <header class="site-header">
@@ -78,6 +78,13 @@
             <option value="Eb4">E♭4</option><option value="E4">E4</option><option value="F4">F4</option>
             <option value="F#4">F♯4</option><option value="G4">G4</option><option value="Ab4">A♭4</option>
             <option value="A4">A4</option><option value="Bb4">B♭4</option><option value="B4">B4</option>
+          </select>
+        </div>
+        <div id="jianpu-source-control" class="source-options" hidden>
+          <label for="jianpu-source">简谱组件下载</label>
+          <select id="jianpu-source">
+            <option value="origin">原线路（默认）</option>
+            <option value="mirror">JSDMirror（测试）</option>
           </select>
         </div>
         <div id="pdf-control" class="source-options" hidden>

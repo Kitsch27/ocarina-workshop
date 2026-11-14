@@ -709,6 +709,7 @@ function renderSourceOptions() {
   $('audio-hint').hidden = !audioFile;
   $('key-control').hidden = !visual || recognitionType.value === 'staff' ||
     (!selected && recognitionType.value !== 'numbered');
+  $('jianpu-source-control').hidden = $('key-control').hidden;
   $('pdf-control').hidden = selected?.kind !== 'pdf';
   const parts = selected?.parts ?? [];
   $('part-control').hidden = parts.length <= 1;
@@ -721,7 +722,7 @@ function renderSourceOptions() {
   $('convert-label').textContent = audioFile ? '提取旋律并转谱' : '识别并转谱';
   $('convert-button').disabled = !selected?.ready || Boolean(task);
   $('progress').hidden = !task;
-  for (const id of ['jianpu-key', 'source-part', 'pdf-pages', 'demo-button']) $(id).disabled = Boolean(task);
+  for (const id of ['jianpu-key', 'jianpu-source', 'source-part', 'pdf-pages', 'demo-button']) $(id).disabled = Boolean(task);
 }
 
 function releaseSelected() {
@@ -984,10 +985,10 @@ async function recognizeImages(run, source, part, type, key, pages) {
       }
     }
     if (!recognized && (type === 'numbered' || (type === 'auto' && !staffDetected))) {
-      jianpu ??= await import('./jianpu.mjs?v=10');
+      jianpu ??= await import('./jianpu.mjs?v=11');
       run.tesseract ??= await jianpu.makeTextRecognizer(signal, (message, ratio) => {
         progress(run, currentPageLabel + message, currentBase + weight * ratio);
-      });
+      }, { preferMirror: run.preferMirror });
       recognized = await raceAbort(jianpu.recognizeJianpu(canvas, run.tesseract, signal, knownKey, part), signal);
       partCount = Math.max(partCount, recognized.parts);
       if (recognized.key) knownKey = recognized.key;
@@ -1054,7 +1055,7 @@ $('convert-button').addEventListener('click', async () => {
   const part = Number(partSelect.value || 0);
   const type = recognitionType.value;
   const key = $('jianpu-key').value;
-  const run = { controller: new AbortController() };
+  const run = { controller: new AbortController(), preferMirror: $('jianpu-source').value === 'mirror' };
   task = run;
   try {
     feedback($('upload-feedback'), '');
@@ -1076,7 +1077,9 @@ $('convert-button').addEventListener('click', async () => {
     if (result.notes.length > MAX_NOTES) throw new Error('识别结果超过 1200 个音符，请分段转换。');
     if (result.original?.length) source.preview = result.original;
     showScore(result);
-    feedback($('upload-feedback'), '转换完成，可在按键谱中校对。');
+    const sources = run.preferMirror && run.tesseract?.assetSources;
+    const sourceMessage = sources ? `简谱组件来源 · ${sources.join('、')}。` : '';
+    feedback($('upload-feedback'), '转换完成，可在按键谱中校对。' + sourceMessage);
   } catch (error) {
     if (task === run) {
       feedback($('upload-feedback'), error.message || '识谱失败，请重试。', true);

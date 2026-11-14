@@ -1,38 +1,32 @@
 const directory = new URL('./vendor/tesseract/', import.meta.url);
+// Pin the mirror to a commit containing the exact packed assets below.
+const mirrorDirectory = new URL('https://cdn.jsdmirror.com/gh/Kitsch27/ocarina-workshop@bee0b02f27d3ecda42a74089c8b58f2ab69137d4/vendor/tesseract/');
 const downloaded = new Map();
 const CACHE_NAME = 'ocarina-workshop-jianpu-v1';
 const DOWNLOAD_IDLE_MS = 20000;
+const MIRROR_IDLE_MS = 8000;
 const INITIALIZE_MS = 15000;
 
 class OcrLoadError extends Error {
   name = 'OcrLoadError';
 }
 
-async function download({ name, size: expected }, cache, signal, onBytes, retry = false) {
-  if (downloaded.has(name)) return downloaded.get(name);
-  const url = new URL(name, directory);
-  const cached = await cache?.match(url).catch(() => undefined);
-  if (cached) {
-    const bytes = await cached.arrayBuffer().catch(() => undefined);
-    if (bytes?.byteLength === expected) {
-      signal.throwIfAborted();
-      const result = new Uint8Array(bytes);
-      downloaded.set(name, result);
-      return result;
-    }
-  }
+async function download(url, expected, signal, onBytes, { retry = false, sha256 } = {}) {
   const attempt = new AbortController();
   const cancel = () => attempt.abort(signal.reason);
   signal.addEventListener('abort', cancel, { once: true });
   let timer;
   function restartTimer() {
     clearTimeout(timer);
-    timer = setTimeout(() => attempt.abort(), DOWNLOAD_IDLE_MS);
+    timer = setTimeout(() => attempt.abort(), sha256 ? MIRROR_IDLE_MS : DOWNLOAD_IDLE_MS);
   }
   try {
     signal.throwIfAborted();
     restartTimer();
-    const response = await fetch(url, { signal: attempt.signal, cache: retry ? 'reload' : 'default' });
+    const response = await fetch(url, {
+      signal: attempt.signal, cache: retry ? 'reload' : 'default',
+      ...(sha256 ? { credentials: 'omit', referrerPolicy: 'no-referrer' } : {}),
+    });
     if (!response.ok) throw new Error('HTTP ' + response.status);
     const reader = response.body.getReader();
     const chunks = [];
@@ -40,8 +34,9 @@ async function download({ name, size: expected }, cache, signal, onBytes, retry 
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
-      chunks.push(value);
       size += value.length;
+      if (size > expected) throw new Error('Unexpected OCR asset size');
+      chunks.push(value);
       onBytes(size);
       restartTimer();
     }
@@ -52,16 +47,21 @@ async function download({ name, size: expected }, cache, signal, onBytes, retry 
       bytes.set(chunk, offset);
       offset += chunk.length;
     }
-    downloaded.set(name, bytes);
-    void cache?.put(url, new Response(bytes)).catch(() => {});
+    if (sha256) {
+      const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
+      const hash = Array.from(digest, byte => byte.toString(16).padStart(2, '0')).join('');
+      if (hash !== sha256) throw new Error('Unexpected OCR asset hash');
+    }
+    attempt.signal.throwIfAborted();
     return bytes;
   } finally {
     clearTimeout(timer);
     signal.removeEventListener('abort', cancel);
+    attempt.abort();
   }
 }
 
-async function loadAssets(assets, signal, onProgress) {
+async function loadAssets(assets, signal, onProgress, preferMirror) {
   const sizes = new Map();
   const total = assets.reduce((sum, asset) => sum + asset.size, 0);
   const cache = await globalThis.caches?.open(CACHE_NAME).catch(() => undefined);
@@ -71,29 +71,52 @@ async function loadAssets(assets, signal, onProgress) {
   try {
     signal.throwIfAborted();
     return await Promise.all(assets.map(async asset => {
-      const { name, label } = asset;
-      const report = (size, retrying = false) => {
+      const { name, size: expected, label, sha256 } = asset;
+      const url = new URL(name, directory);
+      const report = (size, status) => {
         sizes.set(name, size);
         const loaded = [...sizes.values()].reduce((sum, current) => sum + current, 0);
         const received = (loaded / 1024 / 1024).toFixed(1);
-        onProgress(retrying ? '正在重试下载' + label + '…' : '下载简谱组件… 已接收 ' + received + ' MB',
+        onProgress(`${status}… 已接收 ${received} MB`,
           0.04 + 0.60 * Math.min(1, loaded / total));
       };
-      let bytes;
-      try {
-        bytes = await download(asset, cache, scope.signal, report);
-      } catch {
-        scope.signal.throwIfAborted();
-        report(0, true);
+      let bytes = downloaded.get(name);
+      if (!bytes) {
+        const cached = await cache?.match(url).catch(() => undefined);
+        const stored = await cached?.arrayBuffer().catch(() => undefined);
+        if (stored?.byteLength === expected) bytes = new Uint8Array(stored);
+      }
+      scope.signal.throwIfAborted();
+      if (bytes) {
+        downloaded.set(name, bytes);
+        report(bytes.length, '读取本机简谱组件缓存');
+        return { bytes, source: '本机缓存' };
+      }
+
+      const useMirror = preferMirror && sha256 && globalThis.crypto?.subtle;
+      const originStatus = preferMirror ? '原线路下载简谱组件' : '下载简谱组件';
+      const attempts = [
+        { url, source: '原线路', status: useMirror ? `镜像不可用，改用原线路下载${label}` : originStatus },
+        { url, source: '原线路', status: `正在重试下载${label}`, retry: true },
+      ];
+      if (useMirror) {
+        attempts.unshift({ url: new URL(name, mirrorDirectory), source: 'JSDMirror', status: 'JSDMirror 下载简谱组件', sha256 });
+      }
+      for (const attempt of attempts) {
+        const { status, source } = attempt;
+        report(0, status);
         try {
-          bytes = await download(asset, cache, scope.signal, report, true);
+          bytes = await download(attempt.url, expected, scope.signal, size => report(size, status), attempt);
         } catch {
           scope.signal.throwIfAborted();
-          throw new OcrLoadError(label + '下载失败。请重试，网络不稳定时可用离线版。');
+          continue;
         }
+        downloaded.set(name, bytes);
+        void cache?.put(url, new Response(bytes)).catch(() => {});
+        report(bytes.length, status);
+        return { bytes, source };
       }
-      report(bytes.length);
-      return bytes;
+      throw new OcrLoadError(label + '下载失败。请重试，网络不稳定时可用离线版。');
     }));
   } finally {
     scope.abort();
@@ -102,19 +125,26 @@ async function loadAssets(assets, signal, onProgress) {
 }
 
 // These messages match the bundled Tesseract.js 5.1.1 worker.
-export async function makeTextRecognizer(signal, onProgress) {
+export async function makeTextRecognizer(signal, onProgress, { preferMirror = false } = {}) {
   onProgress('正在下载简谱组件…', 0.04);
   const compressed = typeof DecompressionStream === 'function';
   const engine = compressed
-    ? [{ name: 'jianpu-worker-v1.js.gz', size: 1497046, label: '简谱识别引擎' }]
+    ? [{
+      name: 'jianpu-worker-v1.js.gz', size: 1497046, label: '简谱识别引擎',
+      sha256: '46226dac3bf440a0205035e1d96042ef588515e5a45baf0a449ff9545e5f5389',
+    }]
     : [
       { name: 'tesseract-core-lstm.wasm.js', size: 3954464, label: '简谱识别引擎' },
       { name: 'worker.min.js', size: 111164, label: '简谱识别程序' },
     ];
-  const [model, ...scripts] = await loadAssets([
-    { name: 'eng-jianpu-v1.traineddata.gz', size: 1336014, label: '简谱数字模型' },
+  const assets = await loadAssets([
+    {
+      name: 'eng-jianpu-v1.traineddata.gz', size: 1336014, label: '简谱数字模型',
+      sha256: '9010e1e4806828015fca1b59268029cea3e28f3c5807d2a24dffea8d232f95ab',
+    },
     ...engine,
-  ], signal, onProgress);
+  ], signal, onProgress, preferMirror);
+  const [model, ...scripts] = assets.map(asset => asset.bytes);
   signal.throwIfAborted();
   onProgress('正在初始化简谱识别引擎…', 0.68);
   const workerSource = compressed
@@ -177,6 +207,7 @@ export async function makeTextRecognizer(signal, onProgress) {
     clearTimeout(timer);
   }
   return {
+    assetSources: [...new Set(assets.map(asset => asset.source))],
     terminate,
     setParameters: params => send('setParameters', { params }),
     async recognize(canvas, options = {}, output = { text: true }) {
