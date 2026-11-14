@@ -371,7 +371,7 @@ function exportName(title) {
 }
 
 $('copy').addEventListener('click', async () => {
-  const content = tablatureText(exportSource(), { withBeats: true });
+  const content = tablatureText(exportSource());
   try {
     if (!navigator.clipboard) throw new Error();
     await navigator.clipboard.writeText(content);
@@ -666,7 +666,7 @@ function openStaffWorker(run) {
   return new Promise(resolve => {
     let worker;
     try {
-      worker = new Worker(new URL('./staff-worker.mjs', import.meta.url), { type: 'module' });
+      worker = new Worker(new URL('./staff-worker.mjs?v=12', import.meta.url), { type: 'module' });
     } catch {
       resolve(null);
       return;
@@ -724,6 +724,7 @@ async function staffPage(run, canvas, part, fifths, label, base, weight) {
   const { data } = canvas.getContext('2d').getImageData(0, 0, width, height);
   const page = { data, width, height, part, fifths };
   const onProgress = (message, ratio) => progress(run, label + message, base + weight * ratio);
+  if (!run.staffReady) onProgress('正在载入五线谱识别程序…', 0.08);
   run.staffReady ??= openStaffWorker(run);
   const worker = await run.staffReady;
   signal.throwIfAborted();
@@ -738,9 +739,9 @@ async function staffPage(run, canvas, part, fifths, label, base, weight) {
       console.warn('Staff recognition worker:', error.message);
     }
   }
-  onProgress('载入五线谱识别组件…', 0.14);
+  onProgress('正在载入五线谱识别程序…', 0.08);
   try {
-    const { recognizeStaff } = await raceAbort(import('./staff-engine.mjs'), signal);
+    const { recognizeStaff } = await raceAbort(import('./staff-engine.mjs?v=12'), signal);
     return await raceAbort(recognizeStaff(page, onProgress, signal), signal);
   } catch (error) {
     signal.throwIfAborted();
@@ -778,7 +779,7 @@ async function recognizeImages(run, source, part, type, key, pages) {
     const base = index * weight;
     currentPageLabel = label;
     currentBase = base;
-    progress(run, label + '分析谱面…', base + 0.035);
+    progress(run, label + (page ? '正在渲染 PDF 谱面…' : '正在分析谱面…'), base + weight * 0.035);
     const canvas = page ? await readPdfPage(source.pdf, page) : source.canvas;
     signal.throwIfAborted();
     previews.push(page ? await canvasPreview(canvas, page) : source.preview[0]);

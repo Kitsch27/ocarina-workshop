@@ -9,7 +9,7 @@
   <title>时之笛谱工坊</title>
   <link rel="icon" href="./assets/ocarina-nintendo.png" type="image/png">
   <link rel="stylesheet" href="./styles.css?v=5">
-  <script type="module" src="./app.mjs?v=10"></script>
+  <script type="module" src="./app.mjs?v=12"></script>
 </head>
 <body id="top">
   <header class="site-header">
@@ -92,7 +92,7 @@
         <p class="privacy" id="audio-hint" hidden>音频转谱仍在测试，音高和节奏识别效果有待完善。清晰的独唱、口哨或单件乐器录音效果较好，转谱后可试听校对。音频限 3 分钟、25 MB。</p>
         <button class="button primary convert-button" id="convert-button" type="button" hidden><i class="icon" data-icon="scan-line"></i><span id="convert-label">识别并转谱</span></button>
         <div class="progress" id="progress" hidden>
-          <progress id="progress-bar" max="1"></progress>
+          <progress id="progress-bar" max="1" aria-label="识谱进度"></progress>
           <span id="progress-text" role="status"></span>
           <button class="button text-button compact" id="cancel-recognition" type="button">取消</button>
         </div>

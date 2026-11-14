@@ -9,6 +9,10 @@ ort.env.wasm.initTimeout = 45000;
 const SHARPS = 'FCGDAEB';
 const FLATS = 'BEADGCF';
 const SIGNS = { '#': 1, '##': 2, '-': -1, '--': -2, n: 0 };
+// Fetch returns decoded bytes, even when a host compresses the HTTP response.
+const MODEL_BYTES = 12828981;
+const RUNTIME_BYTES = 11210254;
+const DOWNLOAD_IDLE_MS = 60000;
 let resources;
 
 function deskew(gray, width, height) {
@@ -102,21 +106,87 @@ function normalize(gray, pageWidth, box, top) {
   return norm;
 }
 
-async function loadModel(signal) {
-  const timeout = AbortSignal.timeout(60000);
-  const requestSignal = signal ? AbortSignal.any([signal, timeout]) : timeout;
-  resources ??= Promise.all([
-    fetch(new URL('./vendor/satb/omr-line.fp32.onnx', import.meta.url), { signal: requestSignal }).then(async response => {
-      if (!response.ok) throw new Error('五线谱模型下载失败。');
-      return ort.InferenceSession.create(await response.arrayBuffer(), {
-        executionProviders: ['wasm'], graphOptimizationLevel: 'disabled',
-      });
-    }),
-    fetch(new URL('./vendor/satb/vocab.json', import.meta.url), { signal: requestSignal }).then(response => {
-      if (!response.ok) throw new Error('词表加载失败。');
-      return response.json();
-    }),
-  ]).then(([session, vocab]) => ({ session, words: i2wFromVocab(vocab.tokens) })).catch(error => {
+async function fetchStaffBytes(path, label, signal, onBytes) {
+  const response = await fetch(new URL(path, import.meta.url), { signal });
+  if (!response.ok) throw new Error(label + '下载失败。');
+  if (!response.body || typeof TransformStream !== 'function') {
+    const bytes = await response.arrayBuffer();
+    onBytes(bytes.byteLength);
+    return bytes;
+  }
+  let received = 0;
+  const counted = response.body.pipeThrough(new TransformStream({
+    transform(chunk, controller) {
+      received += chunk.byteLength;
+      onBytes(received);
+      controller.enqueue(chunk);
+    },
+  }));
+  return new Response(counted).arrayBuffer();
+}
+
+async function downloadAndInitialize(signal, onProgress) {
+  const downloads = new AbortController();
+  const requestSignal = signal ? AbortSignal.any([signal, downloads.signal]) : downloads.signal;
+  const total = MODEL_BYTES + RUNTIME_BYTES;
+  let modelBytes = 0;
+  let runtimeBytes = 0;
+  let lastUpdate = -Infinity;
+  let idleTimer;
+  function expectMoreBytes() {
+    clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => downloads.abort(new Error('下载五线谱组件时长时间没有收到数据，请检查网络后重试。')), DOWNLOAD_IDLE_MS);
+  }
+  function report() {
+    const now = performance.now();
+    if (now - lastUpdate < 250) return;
+    lastUpdate = now;
+    const received = modelBytes + runtimeBytes;
+    const fraction = Math.min(1, received / total);
+    onProgress('正在下载五线谱模型和引擎… ' + Math.floor(fraction * 100) + '%（' +
+      (received / 1e6).toFixed(1) + ' / ' + (total / 1e6).toFixed(1) + ' MB）', 0.18 + 0.42 * fraction);
+  }
+  report();
+  let model, runtime, vocab;
+  try {
+    expectMoreBytes();
+    [model, runtime, vocab] = await Promise.all([
+      fetchStaffBytes('./vendor/satb/omr-line.fp32.onnx', '五线谱模型', requestSignal, bytes => {
+        modelBytes = bytes;
+        expectMoreBytes();
+        report();
+      }),
+      fetchStaffBytes('./vendor/ort/ort-wasm-simd-threaded.wasm', '五线谱识别引擎', requestSignal, bytes => {
+        runtimeBytes = bytes;
+        expectMoreBytes();
+        report();
+      }),
+      fetch(new URL('./vendor/satb/vocab.json', import.meta.url), { signal: requestSignal }).then(response => {
+        if (!response.ok) throw new Error('词表加载失败。');
+        return response.json();
+      }),
+    ]);
+  } catch (error) {
+    throw downloads.signal.reason ?? error;
+  } finally {
+    clearTimeout(idleTimer);
+    downloads.abort();
+  }
+  signal?.throwIfAborted();
+  onProgress('下载完成，正在初始化五线谱识别模型…', 0.62);
+  ort.env.wasm.wasmBinary = runtime;
+  try {
+    const session = await ort.InferenceSession.create(model, {
+      executionProviders: ['wasm'], graphOptimizationLevel: 'disabled',
+    });
+    return { session, words: i2wFromVocab(vocab.tokens) };
+  } finally {
+    delete ort.env.wasm.wasmBinary;
+  }
+}
+
+function loadModel(signal, onProgress) {
+  resources ??= downloadAndInitialize(signal, onProgress).catch(error => {
     resources = null;
     throw error;
   });
@@ -176,12 +246,13 @@ function readElements(events, box) {
 }
 
 export async function recognizeStaff({ data, width, height, part, fifths }, onProgress, signal) {
+  onProgress('正在定位五线谱…', 0.12);
   const { gray, layout } = detectPage(data, width, height);
   if (!layout.boxes.length) return { lines: 0, parts: 0, notes: [], unread: 0 };
-  onProgress('载入五线谱识别模型…', 0.2);
-  const { session, words } = await loadModel(signal);
   const parts = Math.max(...layout.systems.map(system => system.length));
   const boxes = layout.boxes.filter(box => box.voice === part);
+  if (!boxes.length) return { notes: [], parts, unread: 0, missing: layout.systems.length, wide: 0, fifths };
+  const { session, words } = await loadModel(signal, onProgress);
   const keyState = { fifths };
   const notes = [];
   let bar = 0;
@@ -190,7 +261,7 @@ export async function recognizeStaff({ data, width, height, part, fifths }, onPr
   let wide = 0;
   for (const [index, box] of boxes.entries()) {
     signal?.throwIfAborted();
-    onProgress(`正在读取第 ${index + 1} / ${boxes.length} 行五线谱…`, 0.25 + 0.72 * index / boxes.length);
+    onProgress(`正在读取第 ${index + 1} / ${boxes.length} 行五线谱…`, 0.70 + 0.25 * index / boxes.length);
     await new Promise(resolve => setTimeout(resolve, 0));
     signal?.throwIfAborted();
     const staffTop = layout.staves[box.staff].lineCenters[0];
@@ -209,5 +280,6 @@ export async function recognizeStaff({ data, width, height, part, fifths }, onPr
     bar = result.nextBar;
     unread += result.unread;
   }
+  onProgress('正在整理五线谱识别结果…', 0.97);
   return { notes, parts, unread, missing, wide, fifths: keyState.fifths };
 }
