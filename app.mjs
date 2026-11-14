@@ -1,5 +1,5 @@
 import { arrange, baseFingers, chooseShift, controlSymbol, DEMO, FINGERING_MODES, formatMelody, KINDS, LAYOUTS, mergeTies, parseMelody, pitchName } from './music.mjs?v=5';
-import { scoreExport, scoreImages, tablatureText } from './score-export.mjs?v=5';
+import { scoreExport, scoreImages, tablatureText } from './score-export.mjs?v=6';
 import { fileKind, MAX_FILE_BYTES, openMusicXML, openPdf, parsePages, readImage, readMusicXML, readPdfPage } from './score-files.mjs';
 
 const $ = id => document.getElementById(id);
@@ -370,7 +370,7 @@ function exportName(title) {
 }
 
 $('copy').addEventListener('click', async () => {
-  const content = tablatureText(exportSource());
+  const content = tablatureText(exportSource(), { withBeats: true });
   try {
     if (!navigator.clipboard) throw new Error();
     await navigator.clipboard.writeText(content);
@@ -398,10 +398,15 @@ function downloadBlob(blob, name) {
   setTimeout(() => URL.revokeObjectURL(url), 30000);
 }
 
-$('download').addEventListener('click', () => {
+function downloadText(withBeats) {
   const source = exportSource();
-  downloadBlob(new Blob(['\uFEFF', tablatureText(source)], { type: 'text/plain;charset=utf-8' }), `${exportName(source.title)}.txt`);
-});
+  const suffix = withBeats ? '-带拍数' : '';
+  const content = tablatureText(source, { withBeats });
+  downloadBlob(new Blob(['\uFEFF', content], { type: 'text/plain;charset=utf-8' }), `${exportName(source.title)}${suffix}.txt`);
+}
+
+$('download').addEventListener('click', () => downloadText(false));
+$('download-with-beats').addEventListener('click', () => downloadText(true));
 
 const imageDialog = $('image-export-dialog');
 const imagePages = $('image-export-pages');

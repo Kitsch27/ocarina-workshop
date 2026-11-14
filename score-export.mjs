@@ -2,6 +2,7 @@ import { controlSymbol, FINGERING_MODES, LAYOUTS } from './music.mjs?v=5';
 
 const REST = '—';
 const UNPLAYABLE = '!';
+const BEAT_LEGEND = '×n 表示 n 拍，省略时为 1 拍';
 
 export function scoreExport(title, bars, { mode, fingeringMode, tempo, url }) {
   const measures = [...bars.values()].map(group => group.map(({ note }) => {
@@ -13,12 +14,12 @@ export function scoreExport(title, bars, { mode, fingeringMode, tempo, url }) {
   const directions = mode === 'classic' ? 'L / ZL 升 / 降半音' : '↑ / ↓ 十字键';
   const legend = [
     `${directions} · 摇↑ / 摇↓ 左摇杆 · 先按住升降音控制，再按发音键`,
-    '— 休止 · ×n 表示 n 拍，省略时为 1 拍',
+    '— 休止',
   ];
   if (measures.some(measure => measure.some(note => note.label === UNPLAYABLE))) legend[1] += ' · ! 超出音域';
   return {
-    title, measures, legend, url,
-    meta: `Nintendo Switch 2《时之笛》 · ${LAYOUTS[mode].name}布局 · ${FINGERING_MODES[fingeringMode].name}指法 · ${tempo} BPM`,
+    title, measures, legend, tempo, url,
+    meta: `Nintendo Switch 2《时之笛》 · ${LAYOUTS[mode].name}布局 · ${FINGERING_MODES[fingeringMode].name}指法`,
   };
 }
 
@@ -26,14 +27,14 @@ function barNumber(index) {
   return String(index + 1).padStart(2, '0');
 }
 
-export function tablatureText({ title, meta, legend, measures, url }) {
+export function tablatureText({ title, meta, legend, measures, tempo, url }, { withBeats = false } = {}) {
   const rows = [];
   const numberWidth = Math.max(2, String(measures.length).length);
   for (const [index, notes] of measures.entries()) {
     const prefix = `${barNumber(index).padStart(numberWidth)} │ `;
     let row = prefix;
     for (const { label, duration } of notes) {
-      const token = label + duration;
+      const token = withBeats ? label + duration : label;
       if (row.length + token.length + 2 > 38) {
         rows.push(row.trimEnd());
         row = ' '.repeat(prefix.length);
@@ -42,7 +43,10 @@ export function tablatureText({ title, meta, legend, measures, url }) {
     }
     rows.push(row.trimEnd());
   }
-  return [title, meta, ...legend, '', ...rows, '', '时之笛谱工坊', url].join('\n');
+  const header = withBeats ? `${meta} · ${tempo} BPM` : meta;
+  const [controls, symbols] = legend;
+  const notation = withBeats ? `${symbols} · ${BEAT_LEGEND}` : symbols;
+  return [title, header, controls, notation, '', ...rows, '', '时之笛谱工坊', url].join('\n');
 }
 
 const WIDTH = 960;
@@ -62,7 +66,7 @@ function wrapText(context, text, width) {
   return lines;
 }
 
-export function scoreImages({ title, meta, legend, measures, url }) {
+export function scoreImages({ title, meta, legend, measures, tempo, url }) {
   const canvas = document.createElement('canvas');
   const context = canvas.getContext('2d');
   if (!context) throw new Error('当前浏览器无法生成图片。');
@@ -128,8 +132,9 @@ export function scoreImages({ title, meta, legend, measures, url }) {
       context.strokeStyle = '#a58d52';
       context.strokeRect(14, 14, WIDTH - 28, height - 28);
       titleLines.forEach((line, index) => write(line, MARGIN, 47 + 46 * index, '700 38px', '#ffe7ac'));
-      write(meta, MARGIN, headerHeight - 24, '500 18px', '#e6e9d6');
-      legend.forEach((line, index) => write(line, MARGIN, headerHeight + 28 + 26 * index, '500 18px', '#433b26'));
+      write(`${meta} · ${tempo} BPM`, MARGIN, headerHeight - 24, '500 18px', '#e6e9d6');
+      write(legend[0], MARGIN, headerHeight + 28, '500 18px', '#433b26');
+      write(`${legend[1]} · ${BEAT_LEGEND}`, MARGIN, headerHeight + 54, '500 18px', '#433b26');
 
       for (const [index, marks] of pageRows.entries()) {
         const y = headerHeight + 84 + index * ROW_HEIGHT;
