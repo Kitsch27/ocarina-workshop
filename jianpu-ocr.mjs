@@ -1,5 +1,6 @@
 const directory = new URL('./vendor/tesseract/', import.meta.url);
 const downloaded = new Map();
+const CACHE_NAME = 'ocarina-workshop-jianpu-v1';
 const DOWNLOAD_IDLE_MS = 20000;
 const INITIALIZE_MS = 15000;
 
@@ -7,8 +8,19 @@ class OcrLoadError extends Error {
   name = 'OcrLoadError';
 }
 
-async function download(name, signal, onBytes) {
+async function download({ name, size: expected }, cache, signal, onBytes, retry = false) {
   if (downloaded.has(name)) return downloaded.get(name);
+  const url = new URL(name, directory);
+  const cached = await cache?.match(url).catch(() => undefined);
+  if (cached) {
+    const bytes = await cached.arrayBuffer().catch(() => undefined);
+    if (bytes?.byteLength === expected) {
+      signal.throwIfAborted();
+      const result = new Uint8Array(bytes);
+      downloaded.set(name, result);
+      return result;
+    }
+  }
   const attempt = new AbortController();
   const cancel = () => attempt.abort(signal.reason);
   signal.addEventListener('abort', cancel, { once: true });
@@ -20,7 +32,7 @@ async function download(name, signal, onBytes) {
   try {
     signal.throwIfAborted();
     restartTimer();
-    const response = await fetch(new URL(name, directory), { signal: attempt.signal });
+    const response = await fetch(url, { signal: attempt.signal, cache: retry ? 'reload' : 'default' });
     if (!response.ok) throw new Error('HTTP ' + response.status);
     const reader = response.body.getReader();
     const chunks = [];
@@ -33,7 +45,7 @@ async function download(name, signal, onBytes) {
       onBytes(size);
       restartTimer();
     }
-    if (!size) throw new Error('Empty response');
+    if (size !== expected) throw new Error('Incomplete OCR asset');
     const bytes = new Uint8Array(size);
     let offset = 0;
     for (const chunk of chunks) {
@@ -41,6 +53,7 @@ async function download(name, signal, onBytes) {
       offset += chunk.length;
     }
     downloaded.set(name, bytes);
+    void cache?.put(url, new Response(bytes)).catch(() => {});
     return bytes;
   } finally {
     clearTimeout(timer);
@@ -48,21 +61,17 @@ async function download(name, signal, onBytes) {
   }
 }
 
-async function loadAssets(signal, onProgress) {
+async function loadAssets(assets, signal, onProgress) {
   const sizes = new Map();
-  // Use the portable core so older browsers on the same network share the same cached file.
-  const assets = [
-    ['worker.min.js', '简谱识别程序'],
-    ['tesseract-core-lstm.wasm.js', '简谱识别引擎'],
-    ['eng.traineddata.gz', '简谱数字模型'],
-  ];
-  const total = 7018501;
+  const total = assets.reduce((sum, asset) => sum + asset.size, 0);
+  const cache = await globalThis.caches?.open(CACHE_NAME).catch(() => undefined);
   const scope = new AbortController();
   const cancel = () => scope.abort(signal.reason);
   signal.addEventListener('abort', cancel, { once: true });
   try {
     signal.throwIfAborted();
-    return await Promise.all(assets.map(async ([name, label]) => {
+    return await Promise.all(assets.map(async asset => {
+      const { name, label } = asset;
       const report = (size, retrying = false) => {
         sizes.set(name, size);
         const loaded = [...sizes.values()].reduce((sum, current) => sum + current, 0);
@@ -72,12 +81,12 @@ async function loadAssets(signal, onProgress) {
       };
       let bytes;
       try {
-        bytes = await download(name, scope.signal, report);
+        bytes = await download(asset, cache, scope.signal, report);
       } catch {
         scope.signal.throwIfAborted();
         report(0, true);
         try {
-          bytes = await download(name, scope.signal, report);
+          bytes = await download(asset, cache, scope.signal, report, true);
         } catch {
           scope.signal.throwIfAborted();
           throw new OcrLoadError(label + '下载失败。请重试，网络不稳定时可用离线版。');
@@ -95,10 +104,24 @@ async function loadAssets(signal, onProgress) {
 // These messages match the bundled Tesseract.js 5.1.1 worker.
 export async function makeTextRecognizer(signal, onProgress) {
   onProgress('正在下载简谱组件…', 0.04);
-  const [script, core, model] = await loadAssets(signal, onProgress);
+  const compressed = typeof DecompressionStream === 'function';
+  const engine = compressed
+    ? [{ name: 'jianpu-worker-v1.js.gz', size: 1497046, label: '简谱识别引擎' }]
+    : [
+      { name: 'tesseract-core-lstm.wasm.js', size: 3954464, label: '简谱识别引擎' },
+      { name: 'worker.min.js', size: 111164, label: '简谱识别程序' },
+    ];
+  const [model, ...scripts] = await loadAssets([
+    { name: 'eng-jianpu-v1.traineddata.gz', size: 1336014, label: '简谱数字模型' },
+    ...engine,
+  ], signal, onProgress);
   signal.throwIfAborted();
   onProgress('正在初始化简谱识别引擎…', 0.68);
-  const url = URL.createObjectURL(new Blob([core, '\n;\n', script], { type: 'text/javascript' }));
+  const workerSource = compressed
+    ? [await new Response(new Blob(scripts).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer()]
+    : [scripts[0], '\n;\n', scripts[1]];
+  signal.throwIfAborted();
+  const url = URL.createObjectURL(new Blob(workerSource, { type: 'text/javascript' }));
   let worker;
   try {
     worker = new Worker(url);

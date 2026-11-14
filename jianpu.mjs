@@ -1,5 +1,5 @@
 import { degreePitch, rootPitch } from './music.mjs';
-export { makeTextRecognizer } from './jianpu-ocr.mjs?v=9';
+export { makeTextRecognizer } from './jianpu-ocr.mjs?v=10';
 
 function components(canvas) {
   const { width, height } = canvas;

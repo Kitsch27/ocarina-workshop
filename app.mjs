@@ -800,7 +800,7 @@ async function recognizeImages(run, source, part, type, key, pages) {
       }
     }
     if (!recognized && (type === 'numbered' || (type === 'auto' && !staffDetected))) {
-      jianpu ??= await import('./jianpu.mjs?v=9');
+      jianpu ??= await import('./jianpu.mjs?v=10');
       run.tesseract ??= await jianpu.makeTextRecognizer(signal, (message, ratio) => {
         progress(run, currentPageLabel + message, currentBase + weight * ratio);
       });

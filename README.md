@@ -20,6 +20,8 @@
 
 ## 离线使用
 
+简谱识别组件随网站发布，首次识谱时下载。浏览器保留网站缓存时，之后打开同一网站可直接复用。
+
 下载并解压项目 ZIP。打开终端，进入包含 `index.html` 的目录，运行下面的命令，再用浏览器打开 [本机工坊](http://127.0.0.1:8000/)。
 
     python -m http.server 8000 --bind 127.0.0.1
@@ -27,6 +29,8 @@
 命令需要 Python 3。Windows 也可用 `py -3`，macOS 和 Linux 通常可用 `python3`。识谱模型随压缩包提供，解压后可断网识谱。启动服务的终端需保持打开。
 
 [下载项目 ZIP](https://github.com/Kitsch27/ocarina-workshop/archive/refs/heads/main.zip)
+
+简谱使用 Tesseract.js 的英语 LSTM 模型识别数字、符号和调号。精简版本保留原字形模型，移除了普通英文词典。更新原始组件后，运行 `node tools/pack-jianpu-ocr.mjs` 重新生成精简资源，并同步更新 `jianpu-ocr.mjs` 中的文件名或缓存版本与字节数。
 
 ## 素材与指法
 
