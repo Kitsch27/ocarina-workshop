@@ -8,11 +8,11 @@
   <meta name="description" content="上传五线谱或简谱，把旋律转换成 Nintendo Switch 2《时之笛》的按键谱。">
   <title>时之笛谱工坊</title>
   <link rel="icon" href="./assets/ocarina-nintendo.png" type="image/png">
-  <link rel="stylesheet" href="./styles.css">
+  <link rel="stylesheet" href="./styles.css?v=2">
   <script type="module" src="./app.mjs"></script>
 </head>
-<body>
-  <header class="site-header" id="top">
+<body id="top">
+  <header class="site-header">
     <div class="page-width header-inner">
       <a class="brand" href="#top">
         <span class="brand-mark"><img src="./assets/ocarina-nintendo.png" alt=""></span>
@@ -144,7 +144,7 @@
       </section>
     </div>
 
-    <section class="guide frame" id="guide" aria-labelledby="guide-heading">
+    <section class="guide frame" id="guide" tabindex="-1" aria-labelledby="guide-heading">
       <div class="panel-head">
         <span class="section-icon"><i class="icon" data-icon="book-open"></i></span>
         <div><h2 id="guide-heading">按键指南</h2><p>打开游戏中的陶笛，进入自由演奏</p></div>
