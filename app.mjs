@@ -142,13 +142,13 @@ function renderScore({ resetFold = false } = {}) {
       const key = makeNoteButton(note.target, note.key, note.beats, note.octaveFold, note.confidence);
       key.setAttribute('aria-pressed', String(index === (editingScore ? editIndex : startIndex)));
       key.addEventListener('click', () => {
-        stopPlayback();
         if (editingScore) {
+          stopPlayback();
           selectEditableNote(index);
           return;
         }
         setPlaybackStart(index);
-        if (note.key) void playSingle(note.target, key);
+        void playSingle(note.key ? note.target : null, key);
       });
       noteButtons[index] = key;
       notes.append(key);
@@ -181,8 +181,44 @@ function showScore(result, scroll = true, keepSettings = false) {
 
 const notePitch = $('note-edit-pitch');
 const noteBeats = $('note-edit-beats');
+const noteEditFeedback = $('note-edit-feedback');
+const pitchPreviewOctave = $('pitch-preview-octave');
+const pitchPreviewNotes = $('pitch-preview-notes');
+const MAX_MIDI_PITCH = 127;
 notePitch.add(new Option('休止符', 'rest'));
-for (let pitch = 0; pitch <= 127; pitch++) notePitch.add(new Option(pitchName(pitch), String(pitch)));
+for (let pitch = 0; pitch <= MAX_MIDI_PITCH; pitch++) notePitch.add(new Option(pitchName(pitch), String(pitch)));
+
+function selectedPitch() {
+  return notePitch.value === 'rest' ? null : Number(notePitch.value);
+}
+
+notePitch.addEventListener('change', () => {
+  void playSingle(selectedPitch(), null, noteEditFeedback);
+});
+
+function renderPitchPreview() {
+  const first = 12 * (Number(pitchPreviewOctave.value) + 1);
+  const last = Math.min(first + 11, MAX_MIDI_PITCH);
+  const buttons = [];
+  for (let pitch = first; pitch <= last; pitch++) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'button';
+    button.textContent = pitchName(pitch);
+    button.addEventListener('click', () => { void playSingle(pitch, button, noteEditFeedback); });
+    buttons.push(button);
+  }
+  pitchPreviewNotes.replaceChildren(...buttons);
+}
+
+for (let pitch = 0; pitch <= MAX_MIDI_PITCH; pitch += 12) {
+  const octave = pitch / 12 - 1;
+  const last = Math.min(pitch + 11, MAX_MIDI_PITCH);
+  pitchPreviewOctave.add(new Option(`${pitchName(pitch)} – ${pitchName(last)}`, String(octave)));
+}
+pitchPreviewOctave.value = '4';
+pitchPreviewOctave.addEventListener('change', renderPitchPreview);
+renderPitchPreview();
 
 function selectEditableNote(index) {
   noteButtons[editIndex]?.setAttribute('aria-pressed', 'false');
@@ -249,7 +285,7 @@ function editNote(action) {
     notes.splice(index, 1);
     index = Math.min(index, notes.length - 1);
   } else {
-    const pitch = notePitch.value === 'rest' ? null : Number(notePitch.value);
+    const pitch = selectedPitch();
     const beats = Number(noteBeats.value);
     const note = { pitch, beats, bar: current.bar };
     if (action === 'insert') {
@@ -285,10 +321,7 @@ function renderGuide() {
   const buttons = baseFingers(mode).map(key => {
     const button = makeNoteButton(key.pitch, key, 1, false);
     button.querySelector('.note-pitch').textContent = pitchName(key.pitch);
-    button.addEventListener('click', () => {
-      stopPlayback();
-      void playSingle(key.pitch, button);
-    });
+    button.addEventListener('click', () => { void playSingle(key.pitch, button); });
     return button;
   });
   $('base-notes').replaceChildren(...buttons);
@@ -397,7 +430,9 @@ function stopPlayback() {
   setPlaying(false);
 }
 
-async function playSingle(pitch, button) {
+async function playSingle(pitch, button = null, status = $('export-feedback')) {
+  stopPlayback();
+  if (pitch === null) return;
   const state = { voices: [] };
   playback = state;
   try {
@@ -409,7 +444,7 @@ async function playSingle(pitch, button) {
   } catch (error) {
     if (playback === state) {
       stopPlayback();
-      feedback($('export-feedback'), error.message, true);
+      feedback(status, error.message, true);
     }
   }
 }

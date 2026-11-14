@@ -8,8 +8,8 @@
   <meta name="description" content="上传乐谱或音频，把旋律转换成 Nintendo Switch 2《时之笛》的按键谱。">
   <title>时之笛谱工坊</title>
   <link rel="icon" href="./assets/ocarina-nintendo.png" type="image/png">
-  <link rel="stylesheet" href="./styles.css?v=13">
-  <script type="module" src="./app.mjs?v=13"></script>
+  <link rel="stylesheet" href="./styles.css?v=14">
+  <script type="module" src="./app.mjs?v=14"></script>
 </head>
 <body id="top">
   <header class="site-header">
@@ -141,6 +141,13 @@
                 <button class="button note-delete" id="delete-note" type="button">删除</button>
               </div>
             </form>
+            <details class="pitch-preview">
+              <summary>试听所有音高</summary>
+              <div class="note-fields">
+                <label for="pitch-preview-octave">八度<select id="pitch-preview-octave"></select></label>
+              </div>
+              <div class="pitch-preview-notes" id="pitch-preview-notes" role="group" aria-label="可试听音高"></div>
+            </details>
             <p class="result-feedback" id="note-edit-feedback" role="status" hidden></p>
           </section>
           <p class="result-feedback" id="result-feedback" role="status" hidden></p>
