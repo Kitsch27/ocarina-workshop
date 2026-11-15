@@ -26,7 +26,7 @@ function framePitch(samples, start, difference) {
     const curvature = before + after - 2 * difference[prior];
     const refined = prior + (curvature > 0 ? (before - after) / (2 * curvature) : 0);
     const midi = 69 + 12 * Math.log2(SAMPLE_RATE / (440 * refined));
-    return { pitch: Math.round(midi), confidence: 1 - difference[prior] };
+    return { pitch: Math.round(midi), midi, confidence: 1 - difference[prior] };
   }
   return null;
 }
@@ -72,7 +72,152 @@ function segmentFrames(frames) {
   return stable.slice(first, last + 1);
 }
 
-export function transcribeMelody(samples, onProgress = () => {}) {
+function appendSegment(segments, segment, separate = false) {
+  const previous = segments.at(-1);
+  if (!separate && previous && previous.pitch === segment.pitch) {
+    previous.end = segment.end;
+    previous.confidence += segment.confidence;
+  } else segments.push(segment);
+}
+
+function meanLevel(levels, start, end) {
+  let sum = 0;
+  for (let index = start; index < end; index++) sum += levels[index];
+  return sum / (end - start);
+}
+
+function stablePitchIn(frames, segment) {
+  let centered = 0;
+  for (let index = segment.start; index < segment.end; index++) {
+    const frame = frames[index];
+    centered = frame && Math.abs(frame.midi - segment.pitch) < 0.21 && frame.confidence >= 0.86 ? centered + 1 : 0;
+    if (centered === 3) return true;
+  }
+  return false;
+}
+
+function smoothVibrato(frames) {
+  const held = new Uint8Array(frames.length);
+  let from = 0;
+  while (from < frames.length) {
+    const frame = frames[from];
+    if (!frame || Math.abs(frame.midi - frame.pitch) >= 0.18) {
+      from++;
+      continue;
+    }
+    let to = from + 1;
+    while (frames[to]?.pitch === frame.pitch && Math.abs(frames[to].midi - frame.pitch) < 0.18) to++;
+    if (to - from >= 4) held.fill(1, from, to);
+    from = to;
+  }
+  const pitches = new Map();
+  const span = 32;
+  for (let start = 0; start + span <= frames.length; start += 4) {
+    const end = start + span;
+    const curve = frames.slice(start, end).map(frame => frame?.midi);
+    const voiced = curve.filter(midi => midi !== undefined);
+    if (voiced.length < span - 2) continue;
+    const low = Math.min(...voiced);
+    const high = Math.max(...voiced);
+    const midpoint = (low + high) / 2;
+    const pitch = Math.round(midpoint);
+    if (high - low < 0.96 || high - low > 2.2 || Math.abs(midpoint - pitch) > 0.27) continue;
+    let gradual = 0;
+    let crossings = 0;
+    let lastSide = 0;
+    for (const [index, midi] of curve.entries()) {
+      const step = Math.abs(midi - curve[index - 1]);
+      if (step >= 0.08 && step <= 0.45) gradual++;
+      if (midi == null || Math.abs(midi - midpoint) < 0.28) continue;
+      const side = Math.sign(midi - midpoint);
+      if (lastSide && side !== lastSide) crossings++;
+      lastSide = side;
+    }
+    // Discrete trills mostly hold a pitch before jumping; a vibrato sweeps through it.
+    if (crossings < 3 || gradual < 12) continue;
+    for (let index = start; index < end; index++) {
+      if (frames[index] && !held[index]) pitches.set(index, pitch);
+    }
+  }
+  return frames.map((frame, index) => pitches.has(index) ? { ...frame, pitch: pitches.get(index) } : frame);
+}
+
+function splitRepeatedPitch(segment, levels, output) {
+  let start = segment.start;
+  const confidence = segment.confidence / (segment.end - segment.start);
+  // A new attack following a pronounced dip can rearticulate a pitch without losing its periodicity.
+  for (let index = start + 6; index <= segment.end - 5; index++) {
+    const before = meanLevel(levels, index - 6, index - 3);
+    const dip = meanLevel(levels, index - 2, index);
+    const after = meanLevel(levels, index + 2, index + 5);
+    const rise = Math.max(levels[index] - levels[index - 1], levels[index + 1] - levels[index]);
+    if (dip * 3 > Math.min(before, after) || levels[index] < dip * 1.75 || rise < after * 0.48) continue;
+    appendSegment(output, { ...segment, start, end: index, confidence: confidence * (index - start) }, true);
+    start = index;
+    index += 5;
+  }
+  appendSegment(output, { ...segment, start, confidence: confidence * (segment.end - start) }, true);
+}
+
+function segmentArticulatedFrames(frames, levels) {
+  frames = smoothVibrato(frames);
+  const runs = [];
+  for (const [index, frame] of frames.entries()) {
+    const before = frames[index - 1]?.pitch;
+    const after = frames[index + 1]?.pitch;
+    const pitch = before != null && before === after ? before : frame?.pitch ?? null;
+    appendSegment(runs, { start: index, end: index + 1, pitch, confidence: frame?.confidence ?? 0 });
+  }
+
+  const stable = [];
+  for (const [index, run] of runs.entries()) {
+    const previous = stable.at(-1);
+    const next = runs[index + 1];
+    const length = run.end - run.start;
+    if (run.pitch != null && length <= 6) {
+      const steady = stablePitchIn(frames, run);
+      const bounded = previous?.pitch != null && previous.pitch === next?.pitch;
+      const wobble = bounded && Math.abs(previous.pitch - run.pitch) === 1 && !steady;
+      if (length < 3 || wobble || (length < 5 && !steady)) {
+        const pitch = previous?.pitch ?? next?.pitch ?? null;
+        appendSegment(stable, { ...run, pitch });
+        continue;
+      }
+    }
+    appendSegment(stable, run);
+  }
+
+  const articulated = [];
+  for (const [index, segment] of stable.entries()) {
+    const previous = articulated.at(-1);
+    const next = stable[index + 1];
+    const length = segment.end - segment.start;
+    if (segment.pitch === null && length < 8 && previous?.pitch != null && next?.pitch != null) {
+      const before = meanLevel(levels, Math.max(previous.start, previous.end - 4), previous.end);
+      const after = meanLevel(levels, next.start, Math.min(next.end, next.start + 4));
+      const gap = meanLevel(levels, segment.start, segment.end);
+      const interrupted = length >= 2 && gap < Math.min(before, after) * 0.3;
+      if (!interrupted || length <= 4) {
+        const boundary = Math.round((segment.start + segment.end) / 2);
+        previous.end = boundary;
+        next.start = boundary;
+        if (!interrupted && previous.pitch === next.pitch) {
+          next.start = previous.start;
+          next.confidence += previous.confidence;
+          articulated.pop();
+        }
+        continue;
+      }
+    }
+    if (segment.pitch === null) appendSegment(articulated, segment);
+    else splitRepeatedPitch(segment, levels, articulated);
+  }
+  const first = articulated.findIndex(segment => segment.pitch !== null);
+  if (first < 0) return [];
+  return articulated.slice(first, articulated.findLastIndex(segment => segment.pitch !== null) + 1);
+}
+
+export function transcribeMelody(samples, onProgress = () => {}, { enhanced = true } = {}) {
   const frames = [];
   const levels = [];
   let peak = 0;
@@ -89,12 +234,14 @@ export function transcribeMelody(samples, onProgress = () => {}) {
   }
   const difference = new Float32Array(MAX_PERIOD + 1);
   const gate = Math.max(0.00008, peak * 0.028);
+  const quietGate = enhanced ? Math.max(0.00008, peak * 0.003) : gate;
   for (const [index, level] of levels.entries()) {
-    frames.push(level < gate ? null : framePitch(padded, index * HOP, difference));
+    const frame = level < quietGate ? null : framePitch(padded, index * HOP, difference);
+    frames.push(enhanced && level < gate && frame?.confidence < 0.88 ? null : frame);
     if (index % 64 === 0) onProgress(index / levels.length);
   }
 
-  const segments = segmentFrames(frames);
+  const segments = enhanced ? segmentArticulatedFrames(frames, levels) : segmentFrames(frames);
   if (!segments.length) throw new Error('未读到清晰的旋律。请试用一段清晰的独唱、口哨或单件乐器录音。');
   const first = segments[0].start;
   const beatsPerFrame = HOP * REFERENCE_TEMPO / (60 * SAMPLE_RATE);

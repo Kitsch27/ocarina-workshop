@@ -8,8 +8,8 @@
   <meta name="description" content="上传乐谱或音频，把旋律转换成 Nintendo Switch 2《时之笛》的按键谱。">
   <title>时之笛谱工坊</title>
   <link rel="icon" href="./assets/ocarina-nintendo.png" type="image/png">
-  <link rel="stylesheet" href="./styles.css?v=16">
-  <script type="module" src="./app.mjs?v=17"></script>
+  <link rel="stylesheet" href="./styles.css?v=17">
+  <script type="module" src="./app.mjs?v=18"></script>
 </head>
 <body id="top">
   <header class="site-header">
@@ -18,7 +18,6 @@
         <span class="brand-mark"><img src="./assets/ocarina-nintendo.png" alt=""></span>
         <span class="brand-text">时之笛谱工坊<span>Ocarina Workshop</span></span>
       </a>
-      <span class="platform"><i class="icon" data-icon="gamepad-2"></i>Nintendo Switch 2</span>
     </div>
   </header>
 
@@ -103,7 +102,14 @@
           <label for="source-part" id="part-label">旋律声部</label>
           <select id="source-part"><option value="0">最上方声部</option></select>
         </div>
-        <p class="privacy" id="audio-hint" hidden>音频转谱仍在测试，音高和节奏识别效果有待完善。清晰的独唱、口哨或单件乐器录音效果较好，转谱后可试听校对。音频限 3 分钟、25 MB。</p>
+        <div id="audio-mode-control" class="source-options" hidden>
+          <label for="audio-mode">旋律提取</label>
+          <select id="audio-mode">
+            <option value="enhanced">改进版（默认）</option>
+            <option value="standard">旧版</option>
+          </select>
+        </div>
+        <p class="privacy" id="audio-hint" hidden>音频转谱仍在测试。适合清晰的独唱、口哨或单件乐器录音，伴奏和多人合奏可能产生误识别。音频限 3 分钟、25 MB。</p>
         <button class="button primary convert-button" id="convert-button" type="button" hidden><i class="icon" data-icon="scan-line"></i><span id="convert-label">识别并转谱</span></button>
         <div class="progress" id="progress" hidden>
           <progress id="progress-bar" max="1" aria-label="识谱进度"></progress>

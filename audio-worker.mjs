@@ -1,8 +1,8 @@
-import { transcribeMelody } from './audio-transcription.mjs?v=8';
+import { transcribeMelody } from './audio-transcription.mjs?v=9';
 
-self.onmessage = ({ data }) => {
+self.onmessage = ({ data: { samples, enhanced } }) => {
   try {
-    const result = transcribeMelody(data, progress => self.postMessage({ progress }));
+    const result = transcribeMelody(samples, progress => self.postMessage({ progress }), { enhanced });
     self.postMessage({ result });
   } catch (error) {
     self.postMessage({ error: error.message });

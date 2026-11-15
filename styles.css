@@ -40,14 +40,12 @@ h2 { font-size: 23px; letter-spacing: .045em; }
 .icon { display: inline-block; width: 17px; height: 17px; flex: none; background-color: currentColor; mask: var(--icon) center / contain no-repeat; }
 .diamond { display: inline-block; height: 6px; width: 6px; flex: none; background: var(--gold); transform: rotate(45deg); }
 .site-header { border-bottom: 1px solid #594b31; background: #101b16; }
-.header-inner { min-height: 70px; display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.header-inner { min-height: 70px; display: flex; align-items: center; }
 .brand { display: inline-flex; align-items: center; gap: 12px; white-space: nowrap; }
 .brand-mark { width: 43px; height: 43px; display: grid; place-items: center; border: 1px solid #9b814b; border-radius: 5px; background: radial-gradient(#37493b, #1b2920 82%); }
 .brand-mark img { width: 35px; height: 28px; object-fit: contain; transform: rotate(-12deg); }
 .brand-text { display: grid; line-height: 1.22; letter-spacing: .095em; font: 700 17px/1.2 var(--serif); }
 .brand-text span { color: var(--gold); font: 600 9px/1.4 Cinzel, Georgia, serif; text-transform: uppercase; letter-spacing: .13em; margin-top: 4px; }
-.platform { display: flex; gap: 8px; align-items: center; color: #d1c499; border: 1px solid #675a38; background: #262e21; padding: 6px 11px; border-radius: 4px; font-size: 12px; white-space: nowrap; }
-.platform .icon { width: 15px; height: 15px; }
 
 main { padding-top: 28px; }
 .frame { border: 1px solid var(--line); border-radius: 9px; box-shadow: 0 8px 36px #070d093a; }
@@ -278,7 +276,6 @@ input[type="checkbox"] { accent-color: var(--gold); }
   .brand-mark img { width: 30px; }
   .brand-text { font-size: 15px; }
   .brand-text span { font-size: 8px; }
-  .platform { display: none; }
   main { padding-top: 15px; }
   .hero { min-height: 284px; }
   .hero-art { background-size: 570px auto; background-position: right 42%; }

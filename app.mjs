@@ -798,6 +798,7 @@ function renderSourceOptions() {
   recognitionType.hidden = $('score-type-label').hidden = audioFile;
   recognitionType.disabled = !visual || Boolean(task);
   $('audio-hint').hidden = !audioFile;
+  $('audio-mode-control').hidden = !audioFile;
   $('recognition-quality-control').hidden = !visual || !selected;
   $('key-control').hidden = !visual || recognitionType.value === 'staff' ||
     (!selected && recognitionType.value !== 'numbered');
@@ -814,7 +815,7 @@ function renderSourceOptions() {
   $('convert-label').textContent = audioFile ? '提取旋律并转谱' : '识别并转谱';
   $('convert-button').disabled = !selected?.ready || Boolean(task);
   $('progress').hidden = !task;
-  for (const id of ['recognition-quality', 'jianpu-key', 'jianpu-source', 'source-part', 'pdf-pages', 'demo-button']) $(id).disabled = Boolean(task);
+  for (const id of ['recognition-quality', 'audio-mode', 'jianpu-key', 'jianpu-source', 'source-part', 'pdf-pages', 'demo-button']) $(id).disabled = Boolean(task);
 }
 
 function releaseSelected() {
@@ -1131,12 +1132,12 @@ function disposeTask(run) {
 
 async function recognizeAudio(run, file) {
   const { signal } = run.controller;
-  const { readAudio } = await import('./audio-files.mjs?v=8');
+  const { readAudio } = await import('./audio-files.mjs?v=9');
   signal.throwIfAborted();
   progress(run, '正在解码音频…', 0.08);
   const samples = await raceAbort(readAudio(file, signal), signal);
   progress(run, '正在提取旋律…', 0.18);
-  const worker = new Worker(new URL('./audio-worker.mjs?v=8', import.meta.url), { type: 'module' });
+  const worker = new Worker(new URL('./audio-worker.mjs?v=9', import.meta.url), { type: 'module' });
   run.audioWorker = worker;
   return raceAbort(new Promise((resolve, reject) => {
     worker.onmessage = ({ data }) => {
@@ -1145,7 +1146,7 @@ async function recognizeAudio(run, file) {
       else progress(run, '正在提取旋律…', 0.18 + 0.8 * data.progress);
     };
     worker.onerror = () => reject(new Error('音频识别组件加载失败，请刷新页面后重试。'));
-    worker.postMessage(samples, [samples.buffer]);
+    worker.postMessage({ samples, enhanced: run.enhancedAudio }, [samples.buffer]);
   }), signal);
 }
 
@@ -1170,6 +1171,7 @@ $('convert-button').addEventListener('click', async () => {
     controller: new AbortController(),
     preferMirror: $('jianpu-source').value === 'mirror',
     enhanced: $('recognition-quality').value === 'enhanced',
+    enhancedAudio: $('audio-mode').value === 'enhanced',
   };
   task = run;
   try {
