@@ -43,7 +43,7 @@ function describeFingering(shape, layout) {
   if (shape.pad) controls.push(shape.pad > 0 ? layout.up : layout.down);
   if (shape.stick) controls.push(shape.stick > 0 ? '左摇杆 ↑' : '左摇杆 ↓');
   const button = layout.buttons[shape.root];
-  return { button, controls, text: [...controls, button].join(' + ') };
+  return { button, controls, text: [...controls, button].join(' + '), basePitch: ROOTS[shape.root] };
 }
 
 export function fingering(pitch, mode = 'normal', fingeringMode = 'simple') {

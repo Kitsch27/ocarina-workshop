@@ -1,4 +1,5 @@
-import { arrange, baseFingers, chooseShift, controlSymbol, DEMO, fingering, FINGERING_MODES, formatMelody, KINDS, LAYOUTS, mergeTies, parseMelody, pitchName } from './music.mjs?v=9';
+import { arrange, baseFingers, chooseShift, controlSymbol, DEMO, fingering, FINGERING_MODES, formatMelody, KINDS, LAYOUTS, mergeTies, parseMelody, pitchName } from './music.mjs?v=10';
+import { previewVoice } from './ocarina-audio.mjs?v=1';
 import { scoreExport, scoreImages, tablatureText } from './score-export.mjs?v=7';
 import { fileKind, MAX_FILE_BYTES, openMusicXML, openPdf, parsePages, readImage, readMusicXML, readPdfPage } from './score-files.mjs?v=9';
 
@@ -186,7 +187,7 @@ function renderScore({ resetFold = false } = {}) {
           return;
         }
         setPlaybackStart(index);
-        void playSingle(note.key ? note.target : null, key);
+        void playSingle(note.key ? note.target : null, note.key, key);
       });
       noteButtons[index] = key;
       notes.append(key);
@@ -242,7 +243,9 @@ function editablePitchValue() {
 
 notePitch.addEventListener('change', () => {
   const value = notePitch.value;
-  void playSingle(value && value !== 'rest' ? Number(value) : null, null, noteEditFeedback);
+  const pitch = value && value !== 'rest' ? Number(value) : null;
+  const key = fingering(pitch, $('control-layout').value, $('fingering-mode').value);
+  void playSingle(pitch, key, null, noteEditFeedback);
 });
 
 function renderPitchChoices() {
@@ -271,7 +274,7 @@ function renderPitchChoices() {
       options.push(option);
     }
     const button = makeNoteButton(pitch, key);
-    button.addEventListener('click', () => { void playSingle(pitch, button, noteEditFeedback); });
+    button.addEventListener('click', () => { void playSingle(pitch, key, button, noteEditFeedback); });
     buttons.push(button);
   }
   notePitch.replaceChildren(...options);
@@ -385,7 +388,7 @@ $('note-editor').addEventListener('submit', event => {
 $('delete-note').addEventListener('click', () => editNote('delete'));
 $('play-source').addEventListener('click', () => {
   const note = score.notes[editIndex];
-  if (note?.pitch != null) void playSingle(note.pitch, noteButtons[editIndex], noteEditFeedback);
+  if (note?.pitch != null) void playSingle(note.pitch, null, noteButtons[editIndex], noteEditFeedback);
 });
 $('next-review').addEventListener('click', () => {
   const index = reviewIndexes.find(index => index > editIndex) ?? reviewIndexes[0];
@@ -406,7 +409,7 @@ function renderGuide() {
   const { range: [low, high], allowCombined } = FINGERING_MODES[$('fingering-mode').value];
   const buttons = baseFingers(mode).map(key => {
     const button = makeNoteButton(key.pitch, key);
-    button.addEventListener('click', () => { void playSingle(key.pitch, button); });
+    button.addEventListener('click', () => { void playSingle(key.pitch, key, button); });
     return button;
   });
   $('base-notes').replaceChildren(...buttons);
@@ -458,31 +461,6 @@ async function audioContext() {
   return audio;
 }
 
-function sound(context, pitch, when, seconds) {
-  const fundamental = context.createOscillator();
-  const overtone = context.createOscillator();
-  const soft = context.createGain();
-  const envelope = context.createGain();
-  const pitchHz = 440 * 2 ** ((pitch - 69) / 12);
-  const end = when + Math.max(0.05, seconds);
-  fundamental.frequency.value = pitchHz;
-  overtone.frequency.value = pitchHz * 2;
-  soft.gain.value = 0.1;
-  fundamental.connect(envelope);
-  overtone.connect(soft).connect(envelope);
-  envelope.connect(context.destination);
-  envelope.gain.setValueAtTime(0.0001, when);
-  envelope.gain.exponentialRampToValueAtTime(0.185, when + 0.024);
-  envelope.gain.setValueAtTime(0.17, Math.max(when + 0.028, end - 0.05));
-  envelope.gain.exponentialRampToValueAtTime(0.0001, end);
-  for (const oscillator of [fundamental, overtone]) {
-    oscillator.start(when);
-    oscillator.stop(end + 0.01);
-  }
-  fundamental.onended = () => envelope.disconnect();
-  return { fundamental, overtone, envelope };
-}
-
 function keepNoteVisible(button) {
   if (!button) return;
   const list = $('bars');
@@ -514,7 +492,7 @@ function stopPlayback() {
     cancelAnimationFrame(previous.frame);
     clearTimeout(previous.timer);
     for (const nodes of previous.voices) {
-      try { nodes.fundamental.stop(); nodes.overtone.stop(); } catch {}
+      try { nodes.oscillator.stop(); } catch {}
       nodes.envelope.disconnect();
     }
   }
@@ -522,7 +500,7 @@ function stopPlayback() {
   setPlaying(false);
 }
 
-async function playSingle(pitch, button = null, status = $('export-feedback')) {
+async function playSingle(pitch, key, button = null, status = $('export-feedback')) {
   stopPlayback();
   if (pitch === null) return;
   const state = { voices: [] };
@@ -531,7 +509,7 @@ async function playSingle(pitch, button = null, status = $('export-feedback')) {
     const context = await audioContext();
     if (playback !== state) return;
     active(button);
-    state.voices.push(sound(context, pitch, context.currentTime + 0.015, 0.42));
+    state.voices.push(previewVoice(context, pitch, context.currentTime + 0.015, 0.42, key?.basePitch));
     state.timer = setTimeout(stopPlayback, 460);
   } catch (error) {
     if (playback === state) {
@@ -577,13 +555,11 @@ $('play').addEventListener('click', async () => {
         const { start, end, note } = timeline[nextAudio++];
         if (note.key && end > now && (nextAudio === 1 || !note.tiedFromPrevious)) {
           const begin = Math.max(now, start);
-          const voice = sound(context, note.target, begin, (end - begin) * 0.9);
+          const voice = previewVoice(context, note.target, begin, (end - begin) * 0.9, note.key.basePitch);
           state.voices.push(voice);
-          const cleanup = voice.fundamental.onended;
-          voice.fundamental.onended = () => {
-            cleanup();
+          voice.oscillator.addEventListener('ended', () => {
             state.voices = state.voices.filter(item => item !== voice);
-          };
+          }, { once: true });
         }
       }
       state.timer = setTimeout(schedule, 42);
