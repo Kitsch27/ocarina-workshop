@@ -8,8 +8,8 @@
   <meta name="description" content="上传乐谱或音频，把旋律转换成 Nintendo Switch 2《时之笛》的按键谱。">
   <title>时之笛谱工坊</title>
   <link rel="icon" href="./assets/ocarina-nintendo.png" type="image/png">
-  <link rel="stylesheet" href="./styles.css?v=17">
-  <script type="module" src="./app.mjs?v=18"></script>
+  <link rel="stylesheet" href="./styles.css?v=18">
+  <script type="module" src="./app.mjs?v=19"></script>
 </head>
 <body id="top">
   <header class="site-header">
@@ -105,11 +105,26 @@
         <div id="audio-mode-control" class="source-options" hidden>
           <label for="audio-mode">旋律提取</label>
           <select id="audio-mode">
-            <option value="enhanced">改进版（默认）</option>
+            <option value="auto">自动（默认）</option>
+            <option value="enhanced">单旋律</option>
+            <option value="lead">伴奏录音 · 突出高音（测试）</option>
             <option value="standard">旧版</option>
           </select>
         </div>
-        <p class="privacy" id="audio-hint" hidden>音频转谱仍在测试。适合清晰的独唱、口哨或单件乐器录音，伴奏和多人合奏可能产生误识别。音频限 3 分钟、25 MB。</p>
+        <details class="audio-rhythm" id="audio-rhythm-control" hidden>
+          <summary>音频节拍设置</summary>
+          <div class="source-options">
+            <label for="audio-timing">音符时值</label>
+            <select id="audio-timing"><option value="grid">对齐节拍（默认）</option><option value="seconds">保留录音时值</option></select>
+          </div>
+          <div class="source-options" id="audio-grid-control">
+            <label for="audio-bpm">速度</label>
+            <input id="audio-bpm" type="number" min="30" max="240" inputmode="numeric" placeholder="自动 BPM">
+            <label for="audio-meter">拍号</label>
+            <select id="audio-meter"><option value="auto">自动</option><option>2/4</option><option>3/4</option><option>4/4</option><option>6/8</option></select>
+          </div>
+        </details>
+        <p class="privacy" id="audio-hint" hidden>音频转谱仍在测试。清晰的独唱、口哨或单件乐器录音更容易识别。音频限 3 分钟、25 MB。</p>
         <button class="button primary convert-button" id="convert-button" type="button" hidden><i class="icon" data-icon="scan-line"></i><span id="convert-label">识别并转谱</span></button>
         <div class="progress" id="progress" hidden>
           <progress id="progress-bar" max="1" aria-label="识谱进度"></progress>

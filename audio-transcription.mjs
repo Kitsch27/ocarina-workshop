@@ -1,3 +1,5 @@
+import { readAudioRhythm } from './audio-rhythm.mjs?v=1';
+
 export const SAMPLE_RATE = 12000;
 export const MAX_AUDIO_SECONDS = 180;
 const HOP = 144;
@@ -217,7 +219,33 @@ function segmentArticulatedFrames(frames, levels) {
   return articulated.slice(first, articulated.findLastIndex(segment => segment.pitch !== null) + 1);
 }
 
-export function transcribeMelody(samples, onProgress = () => {}, { enhanced = true } = {}) {
+function emphasizeLead(samples) {
+  const angle = 2 * Math.PI * 330 / SAMPLE_RATE;
+  const cosine = Math.cos(angle);
+  const scale = 1 + Math.sin(angle) / Math.SQRT2;
+  const gain = (1 + cosine) / (2 * scale);
+  const feedback1 = -2 * cosine / scale;
+  const feedback2 = (2 - scale) / scale;
+  // Two high-pass stages reduce bass accompaniment before pitch detection.
+  let filtered = samples;
+  for (let pass = 0; pass < 2; pass++) {
+    const output = new Float32Array(filtered.length);
+    let x1 = 0, x2 = 0, y1 = 0, y2 = 0;
+    for (let index = 0; index < filtered.length; index++) {
+      const x = filtered[index];
+      const y = gain * (x - 2 * x1 + x2) - feedback1 * y1 - feedback2 * y2;
+      output[index] = y;
+      x2 = x1;
+      x1 = x;
+      y2 = y1;
+      y1 = y;
+    }
+    filtered = output;
+  }
+  return filtered;
+}
+
+function trackSegments(samples, onProgress, enhanced) {
   const frames = [];
   const levels = [];
   let peak = 0;
@@ -241,8 +269,47 @@ export function transcribeMelody(samples, onProgress = () => {}, { enhanced = tr
     if (index % 64 === 0) onProgress(index / levels.length);
   }
 
-  const segments = enhanced ? segmentArticulatedFrames(frames, levels) : segmentFrames(frames);
+  return enhanced ? segmentArticulatedFrames(frames, levels) : segmentFrames(frames);
+}
+
+function trackProfile(segments) {
+  let upperFrames = 0;
+  let voiced = 0;
+  let leaps = 0;
+  let previous;
+  for (const segment of segments) {
+    if (segment.pitch == null) continue;
+    const length = segment.end - segment.start;
+    if (segment.pitch >= 60) upperFrames += length;
+    voiced += length;
+    if (previous && Math.min(previous.pitch, segment.pitch) < 60 && Math.abs(previous.pitch - segment.pitch) > 12 &&
+      previous.end + 6 >= segment.start) leaps++;
+    previous = segment;
+  }
+  return { upperFrames, voiced, leaps };
+}
+
+export function transcribeMelody(samples, onProgress = () => {}, { enhanced = true, lead = false, autoLead = false, timing } = {}) {
+  let segments = trackSegments(lead ? emphasizeLead(samples) : samples,
+    autoLead ? progress => onProgress(progress * 0.6) : onProgress, enhanced);
+  if (autoLead && segments.length) {
+    const raw = trackProfile(segments);
+    // Retry only when a substantial upper melody repeatedly jumps to the bass register.
+    if (raw.leaps >= 8 && raw.leaps > segments.length * 0.18 && raw.upperFrames > raw.voiced * 0.30) {
+      const candidate = trackSegments(emphasizeLead(samples), progress => onProgress(0.6 + progress * 0.35), enhanced);
+      const filtered = trackProfile(candidate);
+      if (filtered.leaps < raw.leaps * 0.5 && filtered.upperFrames >= raw.upperFrames && filtered.voiced >= raw.voiced * 0.7) {
+        segments = candidate;
+        lead = true;
+      }
+    }
+  }
   if (!segments.length) throw new Error('未读到清晰的旋律。请试用一段清晰的独唱、口哨或单件乐器录音。');
+  if (enhanced && timing && timing.align) {
+    onProgress(0.98, 'rhythm');
+    const score = readAudioRhythm(segments, HOP / SAMPLE_RATE, timing);
+    if (score) return { ...score, leadUsed: lead };
+  }
   const first = segments[0].start;
   const beatsPerFrame = HOP * REFERENCE_TEMPO / (60 * SAMPLE_RATE);
   const notes = [];
@@ -259,5 +326,5 @@ export function transcribeMelody(samples, onProgress = () => {}, { enhanced = tr
       });
     }
   }
-  return { notes, tempo: REFERENCE_TEMPO };
+  return { notes, tempo: REFERENCE_TEMPO, ...(enhanced && timing ? { rhythm: 'seconds', leadUsed: lead } : {}) };
 }

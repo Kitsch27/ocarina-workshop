@@ -1,4 +1,4 @@
-import { MAX_AUDIO_SECONDS, SAMPLE_RATE } from './audio-transcription.mjs?v=9';
+import { MAX_AUDIO_SECONDS, SAMPLE_RATE } from './audio-transcription.mjs?v=10';
 
 export async function readAudio(file, signal) {
   const OfflineContext = window.OfflineAudioContext || window.webkitOfflineAudioContext;

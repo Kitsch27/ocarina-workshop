@@ -198,7 +198,7 @@ function renderScore({ resetFold = false } = {}) {
   $('next-review').hidden = !reviewIndexes.length;
   $('bars').replaceChildren(...rowElements);
   const messages = [...(score.notices ?? [])];
-  if (score.meter) messages.push(`识别到拍号 ${score.meter.num}/${score.meter.den}。`);
+  if (score.meter) messages.push(`拍号 ${score.meter.num}/${score.meter.den}。`);
   if (irregularBars.length) {
     const locations = irregularBars.slice(0, 8).join('、');
     const remaining = irregularBars.length > 8 ? ` 等共 ${irregularBars.length} 处` : '';
@@ -798,7 +798,14 @@ function renderSourceOptions() {
   recognitionType.hidden = $('score-type-label').hidden = audioFile;
   recognitionType.disabled = !visual || Boolean(task);
   $('audio-hint').hidden = !audioFile;
+  const audioMode = $('audio-mode');
   $('audio-mode-control').hidden = !audioFile;
+  const rhythmControl = !audioFile || audioMode.value === 'standard';
+  $('audio-rhythm-control').hidden = rhythmControl;
+  const gridControl = rhythmControl || $('audio-timing').value !== 'grid';
+  $('audio-grid-control').hidden = gridControl;
+  $('audio-timing').disabled = rhythmControl || Boolean(task);
+  for (const id of ['audio-bpm', 'audio-meter']) $(id).disabled = gridControl || Boolean(task);
   $('recognition-quality-control').hidden = !visual || !selected;
   $('key-control').hidden = !visual || recognitionType.value === 'staff' ||
     (!selected && recognitionType.value !== 'numbered');
@@ -817,6 +824,8 @@ function renderSourceOptions() {
   $('progress').hidden = !task;
   for (const id of ['recognition-quality', 'audio-mode', 'jianpu-key', 'jianpu-source', 'source-part', 'pdf-pages', 'demo-button']) $(id).disabled = Boolean(task);
 }
+
+for (const id of ['audio-mode', 'audio-timing']) $(id).addEventListener('change', renderSourceOptions);
 
 function releaseSelected() {
   if (thumbnailUrl) URL.revokeObjectURL(thumbnailUrl);
@@ -1132,22 +1141,33 @@ function disposeTask(run) {
 
 async function recognizeAudio(run, file) {
   const { signal } = run.controller;
-  const { readAudio } = await import('./audio-files.mjs?v=9');
+  const { readAudio } = await import('./audio-files.mjs?v=10');
   signal.throwIfAborted();
   progress(run, '正在解码音频…', 0.08);
   const samples = await raceAbort(readAudio(file, signal), signal);
   progress(run, '正在提取旋律…', 0.18);
-  const worker = new Worker(new URL('./audio-worker.mjs?v=9', import.meta.url), { type: 'module' });
+  const worker = new Worker(new URL('./audio-worker.mjs?v=10', import.meta.url), { type: 'module' });
   run.audioWorker = worker;
   return raceAbort(new Promise((resolve, reject) => {
     worker.onmessage = ({ data }) => {
       if (data.error) reject(new Error(data.error));
       else if (data.result) resolve(data.result);
-      else progress(run, '正在提取旋律…', 0.18 + 0.8 * data.progress);
+      else progress(run, data.stage === 'rhythm' ? '正在对齐音频节拍…' : '正在提取旋律…', 0.18 + 0.8 * data.progress);
     };
     worker.onerror = () => reject(new Error('音频识别组件加载失败，请刷新页面后重试。'));
-    worker.postMessage({ samples, enhanced: run.enhancedAudio }, [samples.buffer]);
+    worker.postMessage({ samples, options: run.audioOptions }, [samples.buffer]);
   }), signal);
+}
+
+function getAudioOptions() {
+  const mode = $('audio-mode').value;
+  if (mode === 'standard') return { enhanced: false };
+  const align = $('audio-timing').value === 'grid';
+  const bpm = $('audio-bpm');
+  if (align && !bpm.reportValidity()) return null;
+  const [num, den] = $('audio-meter').value.split('/').map(Number);
+  const meter = num ? { num, den } : undefined;
+  return { lead: mode === 'lead', autoLead: mode === 'auto', timing: { align, tempo: Number(bpm.value), meter } };
 }
 
 function cancelTask(notice = true) {
@@ -1167,11 +1187,13 @@ $('convert-button').addEventListener('click', async () => {
   const part = Number(partSelect.value || 0);
   const type = recognitionType.value;
   const key = $('jianpu-key').value;
+  const audioOptions = source.kind === 'audio' ? getAudioOptions() : undefined;
+  if (audioOptions === null) return;
   const run = {
     controller: new AbortController(),
     preferMirror: $('jianpu-source').value === 'mirror',
     enhanced: $('recognition-quality').value === 'enhanced',
-    enhancedAudio: $('audio-mode').value === 'enhanced',
+    audioOptions,
   };
   task = run;
   try {
@@ -1182,7 +1204,17 @@ $('convert-button').addEventListener('click', async () => {
     let result;
     if (source.kind === 'audio') {
       const parsed = await recognizeAudio(run, source.file);
-      result = { ...parsed, kind: 'audio', title, notices: ['时值按录音估算，小节按时间分组。可试听并校对音高和拍数。'] };
+      let timingNote = '按录音时长显示，拍数和小节为时间分组。';
+      if (parsed.rhythm === 'grid') {
+        const tempo = parsed.tempoProvided ? '按设定速度' : '估计速度';
+        const measure = parsed.meter ? '' : ' 拍号未确定，暂按 4/4 分组。';
+        timingNote = `${tempo} ${parsed.tempo} BPM，时值已对齐到节拍。${measure}`;
+      } else if (run.audioOptions.timing?.align) {
+        timingNote = '未找到稳定节拍，已保留录音时值。可在音频节拍设置手动填写 BPM 和拍号。';
+      }
+      const notices = [timingNote];
+      if (parsed.leadUsed) notices.push('已减弱低音伴奏来提取高音旋律。');
+      result = { ...parsed, kind: 'audio', title, notices };
     } else if (source.kind === 'xml') {
       const parsed = readMusicXML(source.xml, part);
       result = { ...parsed, kind: 'xml', title: source.xml.title || title, tempo: source.xml.tempo };

@@ -129,6 +129,10 @@ select { appearance: none; padding-right: 26px; background-image: url('./assets/
 .recognition-controls select, .source-options select { font-size: 12px; max-width: 100%; }
 .manual-button { margin-left: auto; min-height: 31px; }
 .source-options input { width: 120px; }
+.audio-rhythm { margin-top: 10px; color: var(--muted); font-size: 12px; }
+.audio-rhythm summary { width: fit-content; padding: 4px 0; cursor: pointer; }
+.audio-rhythm .source-options { margin-top: 6px; }
+.audio-rhythm #audio-bpm { width: 92px; }
 #pdf-page-count { color: var(--muted); font-size: 12px; }
 .privacy { display: flex; align-items: center; gap: 6px; color: #a7b09c; margin-top: 14px; font-size: 11px; }
 .privacy .icon { width: 14px; height: 14px; color: #bcaf7d; }
