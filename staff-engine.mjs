@@ -193,14 +193,63 @@ function loadModel(signal, onProgress) {
   return resources;
 }
 
-function convertLine(elements, keyState, barOffset) {
+function validMeter(meter) {
+  return Number.isInteger(meter?.num) && meter.num > 0 && Number.isInteger(meter.den) && meter.den > 0;
+}
+
+function meterDivisions(meter) {
+  return validMeter(meter) ? 192 * meter.num / meter.den : 0;
+}
+
+function collectMeasures(elements, startingMeter) {
+  const measures = [];
+  let meter = startingMeter;
+  let events = [];
+  for (const element of elements) {
+    if (element.kind === 'attribute' && validMeter(element.time)) meter = element.time;
+    if (element.kind === 'note' || element.kind === 'rest') events.push(element);
+    if (element.kind === 'barline' && events.length) {
+      measures.push({ meter, events, closed: true });
+      events = [];
+    }
+  }
+  if (events.length) measures.push({ meter, events, closed: false });
+  return measures;
+}
+
+function fullMeasureRest(events) {
+  return events.length === 1 && events[0].kind === 'rest' && events[0].duration.base === '1' && !events[0].duration.dots;
+}
+
+function durationSum(events) {
+  return events.reduce((sum, event) => sum + event.duration.divisions, 0);
+}
+
+function sameElements(original, retry) {
+  return original.length === retry.length && original.every((event, index) => {
+    const other = retry[index];
+    return event.kind === other.kind && event.pitch?.step === other.pitch?.step &&
+      event.pitch?.octave === other.pitch?.octave && event.sign === other.sign && event.tie === other.tie;
+  });
+}
+
+function convertLine(elements, keyState, barOffset, enhanced) {
   const notes = [];
   const effective = new Map();
+  const measureRests = new Map();
+  if (enhanced) {
+    for (const { meter, events, closed } of collectMeasures(elements, keyState.meter)) {
+      if (closed && meterDivisions(meter) && fullMeasureRest(events)) {
+        measureRests.set(events[0], meterDivisions(meter));
+      }
+    }
+  }
   let bar = barOffset;
   let unread = 0;
   for (const element of elements) {
     if (element.kind === 'unparseable') unread++;
     if (element.kind === 'attribute' && 'keyFifths' in element) keyState.fifths = element.keyFifths;
+    if (enhanced && element.kind === 'attribute' && validMeter(element.time)) keyState.meter = element.time;
     if (element.kind === 'barline') {
       if (notes.at(-1)?.bar === bar) bar++;
       effective.clear();
@@ -216,8 +265,23 @@ function convertLine(elements, keyState, barOffset) {
       if (explicit !== undefined) effective.set(name, explicit);
       const alter = effective.get(name) ?? signature;
       pitch = pitchNumber(step, octave, alter);
+      if (enhanced) {
+        const pending = keyState.staffTie;
+        const continues = element.tie === 'stop' || element.tie === 'continue';
+        // A tie can carry an accidental through a barline without changing the new bar's key.
+        if (explicit === undefined && continues && pending?.step === step && pending.octave === octave) pitch = pending.pitch;
+        keyState.staffTie = element.tie === 'start' || element.tie === 'continue' ? { step, octave, pitch } : undefined;
+      }
+    } else if (enhanced) {
+      keyState.staffTie = undefined;
     }
-    notes.push({ pitch, beats: element.duration.divisions / 48, bar, tie: element.tie, confidence: element.confidence });
+    const note = { pitch, beats: (measureRests.get(element) ?? element.duration.divisions) / 48, bar, tie: element.tie, confidence: element.confidence };
+    if (enhanced) {
+      const [x, y, w, h] = element.src.bbox;
+      note.sourceBox = { x, y, w, h };
+      if (keyState.meter) note.meter = keyState.meter;
+    }
+    notes.push(note);
   }
   return { notes, nextBar: notes.length ? notes.at(-1).bar + 1 : barOffset, unread };
 }
@@ -245,7 +309,40 @@ function readElements(events, box) {
   });
 }
 
-export async function recognizeStaff({ data, width, height, part, fifths }, onProgress, signal) {
+async function inferLine(session, words, box, input) {
+  const tensor = new ort.Tensor('float32', input.data, [1, 1, input.height, input.width]);
+  const { logits } = await session.run({ input: tensor });
+  const [, frames, classes] = logits.dims;
+  return readElements(decodeLine(logits.data, frames, classes, words), box);
+}
+
+async function retryDurations(session, words, box, input, elements, meter, bar, signal) {
+  const measures = collectMeasures(elements, meter);
+  const suspects = measures.map(({ events, meter, closed }, index) => {
+    const expected = meterDivisions(meter);
+    const observed = durationSum(events);
+    return Boolean(closed && expected && !fullMeasureRest(events) && observed !== expected &&
+      (bar + index > 0 || observed > expected));
+  });
+  if (!suspects.includes(true)) return 0;
+  signal?.throwIfAborted();
+  const contrast = { ...input, data: input.data.map(value => value ** 1.6) };
+  const retry = collectMeasures(await inferLine(session, words, box, contrast), meter);
+  signal?.throwIfAborted();
+  if (retry.length !== measures.length) return 0;
+  let corrected = 0;
+  for (const [index, { events, meter }] of measures.entries()) {
+    if (!suspects[index]) continue;
+    const candidate = retry[index];
+    if (!candidate.closed || meterDivisions(candidate.meter) !== meterDivisions(meter) ||
+      durationSum(candidate.events) !== meterDivisions(meter) || !sameElements(events, candidate.events)) continue;
+    for (const [i, event] of events.entries()) event.duration = candidate.events[i].duration;
+    corrected++;
+  }
+  return corrected;
+}
+
+export async function recognizeStaff({ data, width, height, part, fifths, enhanced = false, meter, staffTie }, onProgress, signal) {
   onProgress('正在定位五线谱…', 0.12);
   const { gray, layout } = detectPage(data, width, height);
   if (!layout.boxes.length) return { lines: 0, parts: 0, notes: [], unread: 0 };
@@ -253,12 +350,13 @@ export async function recognizeStaff({ data, width, height, part, fifths }, onPr
   const boxes = layout.boxes.filter(box => box.voice === part);
   if (!boxes.length) return { notes: [], parts, unread: 0, missing: layout.systems.length, wide: 0, fifths };
   const { session, words } = await loadModel(signal, onProgress);
-  const keyState = { fifths };
+  const keyState = enhanced ? { fifths, meter, staffTie } : { fifths };
   const notes = [];
   let bar = 0;
   let unread = 0;
   let missing = layout.systems.length - boxes.length;
   let wide = 0;
+  let corrected = 0;
   for (const [index, box] of boxes.entries()) {
     signal?.throwIfAborted();
     onProgress(`正在读取第 ${index + 1} / ${boxes.length} 行五线谱…`, 0.70 + 0.25 * index / boxes.length);
@@ -268,18 +366,23 @@ export async function recognizeStaff({ data, width, height, part, fifths }, onPr
     const input = normalize(gray, width, box, staffTop);
     if (input.width < 12 || input.width > 8500) {
       wide++;
+      keyState.staffTie = undefined;
       continue;
     }
-    const tensor = new ort.Tensor('float32', input.data, [1, 1, input.height, input.width]);
-    const { logits } = await session.run({ input: tensor });
-    const [, frames, classes] = logits.dims;
-    const events = decodeLine(logits.data, frames, classes, words);
-    const result = convertLine(readElements(events, box), keyState, bar);
+    const elements = await inferLine(session, words, box, input);
+    if (enhanced) corrected += await retryDurations(session, words, box, input, elements, keyState.meter, bar, signal);
+    const result = convertLine(elements, keyState, bar, enhanced);
     if (!result.notes.some(note => note.pitch != null)) missing++;
     notes.push(...result.notes);
     bar = result.nextBar;
     unread += result.unread;
   }
   onProgress('正在整理五线谱识别结果…', 0.97);
-  return { notes, parts, unread, missing, wide, fifths: keyState.fifths };
+  const result = { notes, parts, unread, missing, wide, fifths: keyState.fifths };
+  if (enhanced) {
+    result.meter = keyState.meter;
+    result.staffTie = keyState.staffTie;
+    result.notices = corrected ? [`重新核对了 ${corrected} 个小节的五线谱时值。`] : [];
+  }
+  return result;
 }

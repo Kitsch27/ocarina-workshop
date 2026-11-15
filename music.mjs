@@ -21,19 +21,34 @@ const fingerings = new Map();
 for (const [difficulty, mod] of steps.entries()) {
   for (const [root, pitch] of ROOTS.entries()) {
     const target = pitch + mod.pad + mod.stick;
-    if (!fingerings.has(target)) fingerings.set(target, { root, difficulty: [0, 1, 1, 2, 2, 5, 5][difficulty], ...mod });
+    if (!fingerings.has(target)) fingerings.set(target, []);
+    fingerings.get(target).push({ target, root, difficulty: [0, 1, 1, 2, 2, 5, 5][difficulty], ...mod });
   }
 }
 
-export function fingering(pitch, mode = 'normal', fingeringMode = 'simple') {
-  const shape = fingerings.get(pitch);
-  if (!shape || (!FINGERING_MODES[fingeringMode].allowCombined && shape.pad && shape.stick)) return null;
-  const layout = LAYOUTS[mode] ?? LAYOUTS.normal;
+const fingeringChoices = Object.fromEntries(Object.entries(FINGERING_MODES).map(([name, { allowCombined }]) => {
+  const byPitch = new Map();
+  const byPitchClass = Array.from({ length: 12 }, () => []);
+  for (const [pitch, shapes] of fingerings) {
+    const playable = allowCombined ? shapes : shapes.filter(shape => !shape.pad || !shape.stick);
+    if (!playable.length) continue;
+    byPitch.set(pitch, playable);
+    byPitchClass[pitch % 12].push(...playable);
+  }
+  return [name, { byPitch, byPitchClass }];
+}));
+
+function describeFingering(shape, layout) {
   const controls = [];
   if (shape.pad) controls.push(shape.pad > 0 ? layout.up : layout.down);
   if (shape.stick) controls.push(shape.stick > 0 ? '左摇杆 ↑' : '左摇杆 ↓');
   const button = layout.buttons[shape.root];
   return { button, controls, text: [...controls, button].join(' + ') };
+}
+
+export function fingering(pitch, mode = 'normal', fingeringMode = 'simple') {
+  const shape = fingeringChoices[fingeringMode].byPitch.get(pitch)?.[0];
+  return shape ? describeFingering(shape, LAYOUTS[mode] ?? LAYOUTS.normal) : null;
 }
 
 export function controlSymbol(control) {
@@ -134,7 +149,7 @@ function foldPitch(pitch, [low, high]) {
   return pitch;
 }
 
-export function chooseShift(notes, fingeringMode = 'simple') {
+export function chooseShift(notes, fingeringMode = 'simple', { preserveMelody = false, fold = false } = {}) {
   const live = notes.filter(note => note.pitch != null);
   if (!live.length) return 0;
   const pitches = live.map(note => note.pitch);
@@ -142,13 +157,30 @@ export function chooseShift(notes, fingeringMode = 'simple') {
   const [low, high] = range;
   const start = low - Math.max(...pitches);
   const end = high - Math.min(...pitches);
+  if (preserveMelody) {
+    const firstFit = end - (high - low);
+    const lastFit = start + (high - low);
+    const fits = firstFit <= lastFit;
+    // An exact fit preserves every interval by shifting the whole melody together.
+    const first = fits ? firstFit : start;
+    const last = fits ? lastFit : end;
+    let best;
+    for (let shift = first; shift <= last; shift++) {
+      const score = planFingering(notes, shift, fingeringMode, fold && !fits);
+      score.effort += live.length * (Math.abs(shift) * 0.016 + (shift % 12 === 0 ? 0 : 0.22));
+      if (!best || score.missing < best.missing || (score.missing === best.missing && easierPlan(score, best))) {
+        best = { ...score, shift };
+      }
+    }
+    return best.shift;
+  }
   let bestCost = Infinity;
   let bestShift = 0;
   for (let shift = start; shift <= end; shift++) {
     let cost = Math.abs(shift) * 0.016 + (shift % 12 === 0 ? 0 : 0.22);
     for (const pitch of pitches) {
       const target = pitch + shift;
-      const fit = target >= low && target <= high ? fingerings.get(target) : null;
+      const fit = target >= low && target <= high ? fingerings.get(target)?.[0] : null;
       cost += fit ? fit.difficulty / pitches.length : 12 + Math.abs(foldPitch(target, range) - target) * 0.01;
     }
     if (cost < bestCost) {
@@ -159,8 +191,115 @@ export function chooseShift(notes, fingeringMode = 'simple') {
   return bestShift;
 }
 
-export function arrange(notes, { shift, mode, fold, fingeringMode = 'simple' }) {
+function easierPlan(a, b) {
+  return a.contour < b.contour || (a.contour === b.contour && a.effort < b.effort);
+}
+
+function contourPenalty(expected, actual) {
+  if (expected === actual) return 0;
+  const changesDirection = Math.sign(expected) !== Math.sign(actual);
+  return Math.abs(expected - actual) + (changesDirection ? 12 + Math.abs(actual) : 0);
+}
+
+function controlChange(before, after) {
+  if (before === after) return 0;
+  return before * after < 0 ? 3 : 1;
+}
+
+function fingeringChange(before, after) {
+  return (before.root === after.root ? 0 : 0.5) +
+    controlChange(before.pad, after.pad) * 1.4 + controlChange(before.stick, after.stick) * 1.6;
+}
+
+function planFingering(notes, shift, fingeringMode, fold, selected) {
+  const { byPitch, byPitchClass } = fingeringChoices[fingeringMode];
+  let missing = 0;
+  let contour = 0;
+  let effort = 0;
+  let previousPitch = null;
+  let gap = 0;
+  let previous = [];
+
+  function finishPhrase() {
+    if (!previous.length) return;
+    let best = previous[0];
+    for (const choice of previous) if (easierPlan(choice, best)) best = choice;
+    contour += best.contour;
+    effort += best.effort;
+    if (selected) {
+      for (let choice = best; choice; choice = choice.parent) selected[choice.index] = choice.shape;
+    }
+    previous = [];
+    previousPitch = null;
+    gap = 0;
+  }
+
+  for (const [index, note] of notes.entries()) {
+    if (note.pitch == null) {
+      gap += note.beats;
+      if (gap >= 2) finishPhrase();
+      continue;
+    }
+    const shifted = note.pitch + shift;
+    const pinned = note.pinnedShift === shift ? byPitch.get(note.performancePitch) : undefined;
+    const shapes = pinned ?? (fold ? byPitchClass[((shifted % 12) + 12) % 12] : byPitch.get(shifted));
+    if (!shapes?.length) {
+      finishPhrase();
+      missing++;
+      continue;
+    }
+    const interval = note.pitch - previousPitch;
+    const previousNote = notes[index - 1];
+    const tied = interval === 0 && gap === 0 && /^(start|continue)$/.test(previousNote?.tie) && /^(continue|stop)$/.test(note.tie);
+    const ties = tied ? previous.filter(prior => shapes.includes(prior.shape)) : [];
+    const candidates = ties.length ? ties.map(prior => prior.shape) : shapes;
+    const boundaryWeight = gap ? 0.5 : note.bar !== previousNote?.bar ? 0.8 : 1;
+    const current = [];
+    for (const shape of candidates) {
+      const change = Math.abs(shape.target - shifted) / 12;
+      // Keep local octave changes small and prefer simple actions when the contour is equal.
+      const baseEffort = shape.difficulty + change * 0.85;
+      const best = { shape, index, contour: Infinity, effort: Infinity, parent: null };
+      if (!previous.length) {
+        best.contour = 0;
+        best.effort = baseEffort;
+      }
+      for (const prior of previous) {
+        if (ties.length && prior.shape !== shape) continue;
+        const distortion = contourPenalty(interval, shape.target - prior.shape.target);
+        const melody = prior.contour + boundaryWeight * distortion;
+        const actions = prior.effort + baseEffort + (gap ? 0 : fingeringChange(prior.shape, shape));
+        if (melody < best.contour || (melody === best.contour && actions < best.effort)) {
+          best.contour = melody;
+          best.effort = actions;
+          if (selected) best.parent = prior;
+        }
+      }
+      current.push(best);
+    }
+    previous = current;
+    previousPitch = note.pitch;
+    gap = 0;
+  }
+  finishPhrase();
+  return { missing, contour, effort };
+}
+
+export function arrange(notes, { shift, mode, fold, fingeringMode = 'simple', preserveMelody = false }) {
   const range = FINGERING_MODES[fingeringMode].range;
+  if (preserveMelody) {
+    const [low, high] = range;
+    const needsFold = fold && notes.some(note => note.pitch != null && (note.pitch + shift < low || note.pitch + shift > high));
+    const selected = new Array(notes.length);
+    planFingering(notes, shift, fingeringMode, needsFold, selected);
+    const layout = LAYOUTS[mode] ?? LAYOUTS.normal;
+    return notes.map((note, index) => {
+      const shifted = note.pitch == null ? null : note.pitch + shift;
+      const shape = selected[index];
+      const target = shape?.target ?? shifted;
+      return { ...note, target, key: shape ? describeFingering(shape, layout) : null, octaveFold: shifted !== target };
+    });
+  }
   return notes.map(note => {
     if (note.pitch == null) return { ...note, target: null, key: null, octaveFold: false };
     const shifted = note.pitch + shift;

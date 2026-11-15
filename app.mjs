@@ -1,5 +1,5 @@
-import { arrange, baseFingers, chooseShift, controlSymbol, DEMO, fingering, FINGERING_MODES, formatMelody, KINDS, LAYOUTS, mergeTies, parseMelody, pitchName } from './music.mjs?v=8';
-import { scoreExport, scoreImages, tablatureText } from './score-export.mjs?v=6';
+import { arrange, baseFingers, chooseShift, controlSymbol, DEMO, fingering, FINGERING_MODES, formatMelody, KINDS, LAYOUTS, mergeTies, parseMelody, pitchName } from './music.mjs?v=9';
+import { scoreExport, scoreImages, tablatureText } from './score-export.mjs?v=7';
 import { fileKind, MAX_FILE_BYTES, openMusicXML, openPdf, parsePages, readImage, readMusicXML, readPdfPage } from './score-files.mjs?v=9';
 
 const $ = id => document.getElementById(id);
@@ -32,6 +32,7 @@ let startIndex = null;
 let manual = false;
 let editingScore = false;
 let editIndex = null;
+let reviewIndexes = [];
 const noteHistory = [];
 
 function feedback(element, message, error = false) {
@@ -41,7 +42,7 @@ function feedback(element, message, error = false) {
   element.hidden = !message;
 }
 
-function makeNoteButton(pitch, key, beats, octaveFold, confidence) {
+function makeNoteButton(pitch, key, beats, octaveFold, confidence, tiedFromPrevious) {
   const button = document.createElement('button');
   button.type = 'button';
   button.className = 'note';
@@ -52,7 +53,7 @@ function makeNoteButton(pitch, key, beats, octaveFold, confidence) {
   const name = pitchName(pitch);
   const duration = beats == null ? '' : prettyBeats(beats);
   label.textContent = beats == null ? name : `${pitch == null ? '休' : name} · ${duration}`;
-  const description = [name, key?.text, beats == null ? '' : `${duration} 拍`, octaveFold ? '已单独移八度' : '', confidence < 0.62 ? '请校对' : ''].filter(Boolean).join('，');
+  const description = [name, tiedFromPrevious ? '延续上一音' : key?.text, beats == null ? '' : `${duration} 拍`, octaveFold ? '已移八度' : '', confidence < 0.62 ? '识别需校对' : ''].filter(Boolean).join('，');
   button.title = description;
   button.setAttribute('aria-label', description);
   if (pitch == null) {
@@ -63,6 +64,9 @@ function makeNoteButton(pitch, key, beats, octaveFold, confidence) {
     chip.classList.add('unplayable');
     button.title += '，超出当前指法音域';
     button.setAttribute('aria-label', button.title);
+  } else if (tiedFromPrevious) {
+    chip.textContent = '～';
+    chip.classList.add('rest');
   } else {
     chip.classList.add(`button-${key.button}`);
     if (key.controls.length) {
@@ -73,10 +77,10 @@ function makeNoteButton(pitch, key, beats, octaveFold, confidence) {
     }
     chip.append(key.button);
   }
-  if (octaveFold || confidence < 0.62) {
+  for (const symbol of [octaveFold ? '*' : '', confidence < 0.62 ? '?' : ''].filter(Boolean)) {
     const mark = document.createElement('span');
     mark.className = 'adjusted';
-    mark.textContent = '*';
+    mark.textContent = symbol;
     mark.setAttribute('aria-hidden', 'true');
     label.append(mark);
   }
@@ -105,6 +109,24 @@ function setPlaybackStart(index) {
   $('reset-playback-start').hidden = index === null;
 }
 
+function preservesMelody() {
+  return $('arrangement-mode').value === 'melody';
+}
+
+function automaticShift(fold = $('fold').checked) {
+  return chooseShift(score.notes, $('fingering-mode').value, {
+    preserveMelody: preservesMelody(), mode: $('control-layout').value, fold,
+  });
+}
+
+function measureTiming(group) {
+  const { meter } = group[0].note;
+  if (!meter) return null;
+  const expected = meter.num * 4 / meter.den;
+  const total = group.reduce((sum, { note }) => sum + note.beats, 0);
+  return Math.abs(total - expected) > 0.025 ? { meter, total, expected } : null;
+}
+
 function renderScore({ resetFold = false } = {}) {
   stopPlayback();
   const mode = $('control-layout').value;
@@ -113,7 +135,15 @@ function renderScore({ resetFold = false } = {}) {
   if (resetFold) {
     $('fold').checked = score.notes.some(({ pitch }) => pitch != null && (pitch + shift < low || pitch + shift > high));
   }
-  arranged = arrange(score.notes, { mode, shift, fingeringMode, fold: $('fold').checked });
+  arranged = arrange(score.notes, { mode, shift, fingeringMode, fold: $('fold').checked, preserveMelody: preservesMelody() });
+  if (score.keepTies) {
+    arranged.forEach((note, index) => {
+      const previous = arranged[index - 1];
+      note.tiedFromPrevious = Boolean(note.key && previous?.key && note.pitch === previous.pitch &&
+        note.target === previous.target && ['continue', 'stop'].includes(note.tie) && ['start', 'continue'].includes(previous.tie));
+      if (note.tiedFromPrevious) note.key = previous.key;
+    });
+  }
   $('score-kind').textContent = score.kind === 'demo' ? '示例' : KINDS[score.kind];
   $('score-name').textContent = score.title;
   const bars = collectBars(arranged);
@@ -125,6 +155,8 @@ function renderScore({ resetFold = false } = {}) {
 
   const rowElements = [];
   noteButtons = [];
+  reviewIndexes = [];
+  const irregularBars = [];
   let position = 0;
   for (const group of bars.values()) {
     const row = document.createElement('div');
@@ -133,10 +165,19 @@ function renderScore({ resetFold = false } = {}) {
     barNumber.className = 'bar-index';
     barNumber.textContent = String(++position).padStart(2, '0');
     barNumber.setAttribute('aria-label', `第 ${position} 小节`);
+    const timing = measureTiming(group);
+    if (timing) {
+      irregularBars.push(position);
+      reviewIndexes.push(group[0].index);
+      barNumber.classList.add('rhythm-review');
+      barNumber.title = `合计 ${prettyBeats(timing.total)} 拍，${timing.meter.num}/${timing.meter.den} 完整小节为 ${prettyBeats(timing.expected)} 拍（四分音符为一拍）`;
+      barNumber.setAttribute('aria-label', `第 ${position} 小节，${barNumber.title}`);
+    }
     const notes = document.createElement('div');
     notes.className = 'notes';
     for (const { note, index } of group) {
-      const key = makeNoteButton(note.target, note.key, note.beats, note.octaveFold, note.confidence);
+      if (note.confidence < 0.62 || (note.pitch != null && !note.key)) reviewIndexes.push(index);
+      const key = makeNoteButton(note.target, note.key, note.beats, note.octaveFold, note.confidence, note.tiedFromPrevious);
       key.setAttribute('aria-pressed', String(index === (editingScore ? editIndex : startIndex)));
       key.addEventListener('click', () => {
         if (editingScore) {
@@ -153,10 +194,19 @@ function renderScore({ resetFold = false } = {}) {
     row.append(barNumber, notes);
     rowElements.push(row);
   }
+  reviewIndexes = [...new Set(reviewIndexes)];
+  $('next-review').hidden = !reviewIndexes.length;
   $('bars').replaceChildren(...rowElements);
   const messages = [...(score.notices ?? [])];
+  if (score.meter) messages.push(`识别到拍号 ${score.meter.num}/${score.meter.den}。`);
+  if (irregularBars.length) {
+    const locations = irregularBars.slice(0, 8).join('、');
+    const remaining = irregularBars.length > 8 ? ` 等共 ${irregularBars.length} 处` : '';
+    messages.push(`第 ${locations} 小节${remaining}的时值与拍号不符，请核对原谱。`);
+  }
   if (outOfRange) messages.push(`${outOfRange} 个音超出当前指法音域，可在演奏设置中调整移调或八度。试听时这些音保留为停顿。`);
-  if (folded || uncertain) messages.push(`* 标记${[folded ? `已移八度的 ${folded} 个音` : '', uncertain ? '需要校对的音' : ''].filter(Boolean).join('和')}。`);
+  if (folded) messages.push(`* 标记已移八度的 ${folded} 个音。`);
+  if (uncertain) messages.push('? 标记需要校对的音。');
   $('result-feedback').textContent = messages.join(' ');
   $('result-feedback').hidden = !messages.length;
   feedback($('export-feedback'), '');
@@ -171,7 +221,7 @@ function showScore(result, scroll = true, keepSettings = false) {
     $('tempo').value = Math.min(240, Math.max(30, Math.round(result.tempo || 96)));
     $('transposition').value = 'auto';
   }
-  if ($('transposition').value === 'auto') shift = chooseShift(score.notes, $('fingering-mode').value);
+  if ($('transposition').value === 'auto') shift = automaticShift(!keepSettings || $('fold').checked);
   renderScore({ resetFold: !keepSettings });
   $('bars').scrollTop = 0;
   if (scroll && matchMedia('(max-width: 770px)').matches) $('result').scrollIntoView({ block: 'start' });
@@ -233,6 +283,7 @@ function selectEditableNote(index, draftPitch, draftBeats) {
   editIndex = index;
   const note = score.notes[index];
   $('note-editor').hidden = !note;
+  $('play-source').disabled = !note || note.pitch == null;
   feedback($('note-edit-feedback'), '');
   if (!note) {
     $('note-selection').textContent = '选择谱上的音符或休止符进行校对';
@@ -242,10 +293,13 @@ function selectEditableNote(index, draftPitch, draftBeats) {
   // Scores can retain gaps in bar IDs after a deletion.
   const bars = collectBars(score.notes);
   const bar = [...bars.keys()].indexOf(note.bar) + 1;
-  const position = bars.get(note.bar).findIndex(item => item.index === index) + 1;
+  const group = bars.get(note.bar);
+  const position = group.findIndex(item => item.index === index) + 1;
   const pitch = editablePitchValue();
   const description = pitch ? `原谱 ${pitchName(note.pitch)}` : `原谱 ${pitchName(note.pitch)}（无可用指法）`;
-  $('note-selection').textContent = `第 ${bar} 小节 · 第 ${position} 格 · ${description}`;
+  const timing = measureTiming(group);
+  const rhythm = timing ? ` · 小节合计 ${prettyBeats(timing.total)}/${prettyBeats(timing.expected)} 拍` : '';
+  $('note-selection').textContent = `第 ${bar} 小节 · 第 ${position} 格 · ${description}${rhythm}`;
   notePitch.value = draftPitch ?? pitch;
   if (notePitch.selectedIndex < 0) notePitch.value = '';
   noteBeats.value = draftBeats ?? note.beats;
@@ -303,7 +357,12 @@ function editNote(action) {
     const sourcePitch = value === 'rest' ? null : Number(notePitch.selectedOptions[0].dataset.sourcePitch);
     const pitch = action === 'save' && value === editablePitchValue() ? current.pitch : sourcePitch;
     const beats = Number(noteBeats.value);
-    const note = { pitch, beats, bar: current.bar };
+    const note = { pitch, beats, bar: current.bar, meter: current.meter, location: current.location };
+    if (action === 'save' && pitch === current.pitch && current.tie) note.tie = current.tie;
+    if (preservesMelody() && value !== 'rest') {
+      note.performancePitch = Number(value);
+      note.pinnedShift = shift;
+    }
     if (action === 'insert') {
       if (notes.length >= MAX_NOTES) return;
       notes.splice(++index, 0, note);
@@ -324,6 +383,17 @@ $('note-editor').addEventListener('submit', event => {
   editNote(event.submitter?.value || 'save');
 });
 $('delete-note').addEventListener('click', () => editNote('delete'));
+$('play-source').addEventListener('click', () => {
+  const note = score.notes[editIndex];
+  if (note?.pitch != null) void playSingle(note.pitch, noteButtons[editIndex], noteEditFeedback);
+});
+$('next-review').addEventListener('click', () => {
+  const index = reviewIndexes.find(index => index > editIndex) ?? reviewIndexes[0];
+  if (index === undefined) return;
+  stopPlayback();
+  selectEditableNote(index);
+  keepNoteVisible(noteButtons[index]);
+});
 $('undo-note').addEventListener('click', () => {
   const previous = noteHistory.pop();
   if (!previous) return;
@@ -351,13 +421,13 @@ for (let offset = -48; offset <= 48; offset++) {
   if (!offset) continue;
   shiftSelect.add(new Option(`${offset > 0 ? '+' : '−'}${Math.abs(offset)} 半音`, String(offset)));
 }
-for (const id of ['control-layout', 'fingering-mode', 'transposition', 'fold']) {
+for (const id of ['control-layout', 'fingering-mode', 'arrangement-mode', 'transposition', 'fold']) {
   $(id).addEventListener('change', () => {
     const draftPitch = editingScore && notePitch.value !== editablePitchValue() ? notePitch.value : undefined;
     if (id === 'control-layout' || id === 'fingering-mode') renderGuide();
-    if (id === 'fingering-mode' || id === 'transposition') {
+    if (id === 'fingering-mode' || id === 'transposition' || id === 'arrangement-mode' || preservesMelody()) {
       const requested = $('transposition').value;
-      shift = requested === 'auto' ? chooseShift(score.notes, $('fingering-mode').value) : Number(requested);
+      shift = requested === 'auto' ? automaticShift() : Number(requested);
     }
     renderScore();
     if (editingScore) {
@@ -482,7 +552,7 @@ $('play').addEventListener('click', async () => {
   if (playback?.song) { stopPlayback(); return; }
   stopPlayback();
   const state = { voices: [], song: true };
-  const first = startIndex ?? 0;
+  const first = (editingScore ? editIndex : startIndex) ?? 0;
   playback = state;
   setPlaying(true);
   try {
@@ -495,13 +565,17 @@ $('play').addEventListener('click', async () => {
       time += note.beats * secondsPerBeat;
       return { start, end: time, note };
     });
+    for (let index = timeline.length - 2; index >= 0; index--) {
+      const next = timeline[index + 1];
+      if (next.note.tiedFromPrevious) timeline[index].end = next.end;
+    }
     let nextAudio = 0;
     let activeIndex = -1;
     const schedule = () => {
       const now = context.currentTime;
       while (nextAudio < timeline.length && timeline[nextAudio].start <= now + 0.22) {
         const { start, end, note } = timeline[nextAudio++];
-        if (note.key && end > now) {
+        if (note.key && end > now && (nextAudio === 1 || !note.tiedFromPrevious)) {
           const begin = Math.max(now, start);
           const voice = sound(context, note.target, begin, (end - begin) * 0.9);
           state.voices.push(voice);
@@ -633,10 +707,10 @@ function freePanel(container) {
   container.replaceChildren();
 }
 
-function showOriginal(container, pages) {
+function showOriginal(container, pages, location) {
   freePanel(container);
   const urls = [];
-  for (const page of pages) {
+  for (const [index, page] of pages.entries()) {
     const image = new Image();
     image.alt = page.number ? `原谱第 ${page.number} 页` : '上传的原谱';
     image.src = URL.createObjectURL(page.blob);
@@ -646,7 +720,24 @@ function showOriginal(container, pages) {
       label.textContent = `第 ${page.number} 页`;
       container.append(label);
     }
-    container.append(image);
+    if (!location || location.page !== index) {
+      container.append(image);
+      continue;
+    }
+    const figure = document.createElement('div');
+    figure.className = 'original-figure';
+    const focus = document.createElement('span');
+    focus.className = 'original-focus';
+    focus.setAttribute('aria-hidden', 'true');
+    focus.style.left = `${location.x * 100}%`;
+    focus.style.top = `${location.y * 100}%`;
+    focus.style.width = `${location.w * 100}%`;
+    focus.style.height = `${location.h * 100}%`;
+    figure.append(image, focus);
+    container.append(figure);
+    image.addEventListener('load', () => {
+      if (focus.isConnected) focus.scrollIntoView({ block: 'center' });
+    }, { once: true });
   }
   panelUrls.set(container, urls);
 }
@@ -671,7 +762,7 @@ $('edit-score').addEventListener('click', () => {
 });
 $('bulk-edit').addEventListener('click', () => openEditor(false));
 $('score-original').addEventListener('click', () => {
-  showOriginal($('original-image'), score.original);
+  showOriginal($('original-image'), score.original, score.notes[editIndex]?.location);
   original.showModal();
 });
 $('close-editor').addEventListener('click', () => editor.close());
@@ -707,6 +798,7 @@ function renderSourceOptions() {
   recognitionType.hidden = $('score-type-label').hidden = audioFile;
   recognitionType.disabled = !visual || Boolean(task);
   $('audio-hint').hidden = !audioFile;
+  $('recognition-quality-control').hidden = !visual || !selected;
   $('key-control').hidden = !visual || recognitionType.value === 'staff' ||
     (!selected && recognitionType.value !== 'numbered');
   $('jianpu-source-control').hidden = $('key-control').hidden;
@@ -722,7 +814,7 @@ function renderSourceOptions() {
   $('convert-label').textContent = audioFile ? '提取旋律并转谱' : '识别并转谱';
   $('convert-button').disabled = !selected?.ready || Boolean(task);
   $('progress').hidden = !task;
-  for (const id of ['jianpu-key', 'jianpu-source', 'source-part', 'pdf-pages', 'demo-button']) $(id).disabled = Boolean(task);
+  for (const id of ['recognition-quality', 'jianpu-key', 'jianpu-source', 'source-part', 'pdf-pages', 'demo-button']) $(id).disabled = Boolean(task);
 }
 
 function releaseSelected() {
@@ -850,7 +942,7 @@ function openStaffWorker(run) {
   return new Promise(resolve => {
     let worker;
     try {
-      worker = new Worker(new URL('./staff-worker.mjs?v=12', import.meta.url), { type: 'module' });
+      worker = new Worker(new URL('./staff-worker.mjs?v=13', import.meta.url), { type: 'module' });
     } catch {
       resolve(null);
       return;
@@ -902,11 +994,11 @@ function processStaffWorker(worker, page, signal, onProgress) {
   });
 }
 
-async function staffPage(run, canvas, part, fifths, label, base, weight) {
+async function staffPage(run, canvas, part, { fifths, meter, staffTie }, label, base, weight) {
   const signal = run.controller.signal;
   const { width, height } = canvas;
   const { data } = canvas.getContext('2d').getImageData(0, 0, width, height);
-  const page = { data, width, height, part, fifths };
+  const page = { data, width, height, part, fifths, meter, staffTie, enhanced: run.enhanced };
   const onProgress = (message, ratio) => progress(run, label + message, base + weight * ratio);
   if (!run.staffReady) onProgress('正在载入五线谱识别程序…', 0.08);
   run.staffReady ??= openStaffWorker(run);
@@ -925,7 +1017,7 @@ async function staffPage(run, canvas, part, fifths, label, base, weight) {
   }
   onProgress('正在载入五线谱识别程序…', 0.08);
   try {
-    const { recognizeStaff } = await raceAbort(import('./staff-engine.mjs?v=12'), signal);
+    const { recognizeStaff } = await raceAbort(import('./staff-engine.mjs?v=13'), signal);
     return await raceAbort(recognizeStaff(page, onProgress, signal), signal);
   } catch (error) {
     signal.throwIfAborted();
@@ -957,6 +1049,10 @@ async function recognizeImages(run, source, part, type, key, pages) {
   const weight = 0.95 / pages.length;
   let knownKey = key;
   let fifths = 0;
+  let meter;
+  let firstMeter;
+  let staffTie;
+  let tempo;
   for (const [index, page] of pages.entries()) {
     signal.throwIfAborted();
     const label = page ? `第 ${page} 页 · ` : '';
@@ -970,11 +1066,12 @@ async function recognizeImages(run, source, part, type, key, pages) {
     let recognized;
     let staffDetected = false;
     if (type !== 'numbered') {
-      const result = await staffPage(run, canvas, part, fifths, label, base, weight);
+      const result = await staffPage(run, canvas, part, { fifths, meter, staffTie }, label, base, weight);
       staffDetected = result.parts > 0;
       partCount = Math.max(partCount, result.parts);
       if (result.notes.some(note => note.pitch != null)) {
         fifths = result.fifths;
+        staffTie = result.staffTie;
         recognized = result;
         kinds.add('staff');
         if (result.parts > 1) notices.add('已按所选声部读取，请校对旋律。');
@@ -985,21 +1082,32 @@ async function recognizeImages(run, source, part, type, key, pages) {
       }
     }
     if (!recognized && (type === 'numbered' || (type === 'auto' && !staffDetected))) {
-      jianpu ??= await import('./jianpu.mjs?v=11');
+      jianpu ??= await import('./jianpu.mjs?v=12');
       run.tesseract ??= await jianpu.makeTextRecognizer(signal, (message, ratio) => {
         progress(run, currentPageLabel + message, currentBase + weight * ratio);
       }, { preferMirror: run.preferMirror });
-      recognized = await raceAbort(jianpu.recognizeJianpu(canvas, run.tesseract, signal, knownKey, part), signal);
+      recognized = await raceAbort(jianpu.recognizeJianpu(canvas, run.tesseract, signal, knownKey, part, { enhanced: run.enhanced, meter }), signal);
       partCount = Math.max(partCount, recognized.parts);
       if (recognized.key) knownKey = recognized.key;
       if (recognized.notes.some(note => note.pitch != null)) kinds.add('numbered');
     }
     if (!recognized?.notes.some(note => note.pitch != null)) {
+      staffTie = undefined;
       unreadPages++;
       continue;
     }
+    meter = recognized.meter ?? meter;
+    firstMeter ??= recognized.notes.find(note => note.meter)?.meter ?? meter;
+    tempo ??= recognized.tempo;
     const offset = (notes.at(-1)?.bar ?? -1) + 1;
-    notes.push(...recognized.notes.map(note => ({ ...note, bar: note.bar + offset })));
+    for (const note of recognized.notes) {
+      const box = note.sourceBox;
+      const location = box && {
+        page: index, x: box.x / canvas.width, y: box.y / canvas.height,
+        w: box.w / canvas.width, h: box.h / canvas.height,
+      };
+      notes.push({ ...note, bar: note.bar + offset, meter: note.meter ?? meter, location });
+    }
     for (const notice of recognized.notices ?? []) notices.add(notice);
     if (notes.length > MAX_NOTES) throw new Error('识别结果超过 1200 个音符，请分段转换。');
   }
@@ -1008,7 +1116,10 @@ async function recognizeImages(run, source, part, type, key, pages) {
     '未能读出可用旋律。请检查识谱方式与声部，或裁剪出清晰的单行主旋律。');
   if (unreadPages) notices.add(`所选页面中有 ${unreadPages} 页没有读到旋律。`);
   if (kinds.has('staff')) notices.add('五线谱识别适用于清晰的印刷谱，请检查音高与节奏。');
-  return { notes: mergeTies(notes), original: previews, kind: kinds.has('staff') ? 'staff' : 'numbered', notices: [...notices] };
+  return {
+    notes: run.enhanced ? notes : mergeTies(notes), original: previews, kind: kinds.has('staff') ? 'staff' : 'numbered',
+    notices: [...notices], meter: firstMeter, tempo, keepTies: run.enhanced,
+  };
 }
 
 function disposeTask(run) {
@@ -1055,7 +1166,11 @@ $('convert-button').addEventListener('click', async () => {
   const part = Number(partSelect.value || 0);
   const type = recognitionType.value;
   const key = $('jianpu-key').value;
-  const run = { controller: new AbortController(), preferMirror: $('jianpu-source').value === 'mirror' };
+  const run = {
+    controller: new AbortController(),
+    preferMirror: $('jianpu-source').value === 'mirror',
+    enhanced: $('recognition-quality').value === 'enhanced',
+  };
   task = run;
   try {
     feedback($('upload-feedback'), '');
@@ -1071,7 +1186,7 @@ $('convert-button').addEventListener('click', async () => {
       result = { ...parsed, kind: 'xml', title: source.xml.title || title, tempo: source.xml.tempo };
     } else {
       const pages = source.pdf ? parsePages($('pdf-pages').value, source.pdf.numPages) : [0];
-      result = { ...await recognizeImages(run, source, part, type, key, pages), title, tempo: 96 };
+      result = { ...await recognizeImages(run, source, part, type, key, pages), title };
     }
     if (task !== run || run.controller.signal.aborted) return;
     if (result.notes.length > MAX_NOTES) throw new Error('识别结果超过 1200 个音符，请分段转换。');

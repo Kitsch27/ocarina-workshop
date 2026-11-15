@@ -1,4 +1,4 @@
-import { recognizeStaff } from './staff-engine.mjs?v=12';
+import { recognizeStaff } from './staff-engine.mjs?v=13';
 
 self.addEventListener('message', async ({ data: message }) => {
   try {

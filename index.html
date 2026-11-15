@@ -8,8 +8,8 @@
   <meta name="description" content="上传乐谱或音频，把旋律转换成 Nintendo Switch 2《时之笛》的按键谱。">
   <title>时之笛谱工坊</title>
   <link rel="icon" href="./assets/ocarina-nintendo.png" type="image/png">
-  <link rel="stylesheet" href="./styles.css?v=15">
-  <script type="module" src="./app.mjs?v=16"></script>
+  <link rel="stylesheet" href="./styles.css?v=16">
+  <script type="module" src="./app.mjs?v=17"></script>
 </head>
 <body id="top">
   <header class="site-header">
@@ -69,6 +69,13 @@
             <option value="numbered">数字简谱</option>
           </select>
           <button class="button text-button manual-button" id="manual-button" type="button"><i class="icon" data-icon="square-pen"></i>手动输入</button>
+        </div>
+        <div id="recognition-quality-control" class="source-options" hidden>
+          <label for="recognition-quality">识谱精度</label>
+          <select id="recognition-quality">
+            <option value="standard">标准（默认）</option>
+            <option value="enhanced">细读谱面（测试）</option>
+          </select>
         </div>
         <div id="key-control" class="source-options" hidden>
           <label for="jianpu-key">简谱 1 的音高</label>
@@ -133,6 +140,8 @@
               <p id="note-selection" role="status">选择谱上的音符或休止符进行校对</p>
               <div class="score-edit-actions">
                 <button class="button" id="undo-note" type="button" disabled>撤销</button>
+                <button class="button" id="next-review" type="button" hidden>下一处待校对</button>
+                <button class="button" id="play-source" type="button">试听识别音</button>
                 <button class="button" id="score-original" type="button" hidden>对照原谱</button>
                 <button class="button" id="bulk-edit" type="button">文本编辑</button>
               </div>
@@ -165,6 +174,8 @@
               <select id="control-layout"><option value="normal">标准</option><option value="classic">经典</option></select>
               <label for="fingering-mode">指法模式</label>
               <select id="fingering-mode"><option value="simple">简易（默认）</option><option value="full">完整（允许组合）</option></select>
+              <label for="arrangement-mode">编排方式</label>
+              <select id="arrangement-mode"><option value="standard">标准（默认）</option><option value="melody">保留旋律走向（测试）</option></select>
               <label for="transposition">整体移调</label>
               <select id="transposition"><option value="auto">自动选择</option><option value="0">原调</option></select>
               <label for="tempo">试听速度</label>

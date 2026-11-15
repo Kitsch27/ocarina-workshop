@@ -1,12 +1,13 @@
 import { controlSymbol, FINGERING_MODES, LAYOUTS } from './music.mjs?v=5';
 
 const REST = '—';
+const CONTINUE = '～';
 const UNPLAYABLE = '!';
 const BEAT_LEGEND = '×n 表示 n 拍，省略时为 1 拍';
 
 export function scoreExport(title, bars, { mode, fingeringMode, tempo, url }) {
   const measures = [...bars.values()].map(group => group.map(({ note }) => {
-    const label = note.pitch == null ? REST : note.key
+    const label = note.pitch == null ? REST : note.tiedFromPrevious ? CONTINUE : note.key
       ? [...note.key.controls.map(controlSymbol), note.key.button].join('+') : UNPLAYABLE;
     const beats = Number(note.beats.toFixed(3));
     return { label, duration: beats === 1 ? '' : `×${beats}` };
@@ -16,6 +17,7 @@ export function scoreExport(title, bars, { mode, fingeringMode, tempo, url }) {
     `${directions} · 摇↑ / 摇↓ 左摇杆 · 先按住升降音控制，再按发音键`,
     '— 休止',
   ];
+  if (measures.some(measure => measure.some(note => note.label === CONTINUE))) legend[1] += ' · ～ 继续按住上一音';
   if (measures.some(measure => measure.some(note => note.label === UNPLAYABLE))) legend[1] += ' · ! 超出音域';
   return {
     title, measures, legend, tempo, url,
@@ -143,7 +145,7 @@ export function scoreImages({ title, meta, legend, measures, tempo, url }) {
             write(mark.bar, mark.x, y + 17, '700 17px', '#665632');
             continue;
           }
-          const rest = mark.label === REST;
+          const rest = mark.label === REST || mark.label === CONTINUE;
           const outOfRange = mark.label === UNPLAYABLE;
           context.fillStyle = rest ? '#e6d8ad' : outOfRange ? '#eed0a6' : '#244739';
           context.fillRect(mark.x, y, mark.width, 34);
