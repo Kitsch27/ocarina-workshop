@@ -11,7 +11,7 @@ export const LAYOUTS = {
   normal: { name: '标准', buttons: ['L', 'R', 'A', 'Y', 'X'], up: '十字键 ↑', down: '十字键 ↓' },
   classic: { name: '经典', buttons: ['R', 'B', 'A', 'X', 'Y'], up: 'L', down: 'ZL' },
 };
-export const KINDS = { staff: '五线谱', numbered: '数字简谱', xml: 'MusicXML', audio: '音频', manual: '手动输入' };
+export const KINDS = { staff: '五线谱', numbered: '数字简谱', tab: '吉他六线谱', xml: 'MusicXML', audio: '音频', manual: '手动输入' };
 
 const steps = [
   { pad: 0, stick: 0 }, { pad: 1, stick: 0 }, { pad: -1, stick: 0 },

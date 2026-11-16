@@ -9,7 +9,7 @@
   <title>时之笛谱工坊</title>
   <link rel="icon" href="./assets/ocarina-nintendo.png" type="image/png">
   <link rel="stylesheet" href="./styles.css?v=18">
-  <script type="module" src="./app.mjs?v=20"></script>
+  <script type="module" src="./app.mjs?v=21"></script>
 </head>
 <body id="top">
   <header class="site-header">
@@ -66,6 +66,7 @@
             <option value="auto">自动识别</option>
             <option value="staff">五线谱</option>
             <option value="numbered">数字简谱</option>
+            <option value="tab">吉他六线谱（测试）</option>
           </select>
           <button class="button text-button manual-button" id="manual-button" type="button"><i class="icon" data-icon="square-pen"></i>手动输入</button>
         </div>
@@ -92,6 +93,21 @@
             <option value="origin">原线路（默认）</option>
             <option value="mirror">JSDMirror（测试）</option>
           </select>
+        </div>
+        <div id="tab-controls" hidden>
+          <div class="source-options">
+            <label for="tab-capo">变调夹品位</label>
+            <input id="tab-capo" type="number" min="0" max="12" value="0">
+            <label for="tab-meter">拍号</label>
+            <select id="tab-meter"><option>4/4</option><option>2/4</option><option>3/4</option><option>6/8</option></select>
+            <label for="tab-tempo">速度 BPM</label>
+            <input id="tab-tempo" type="number" min="30" max="240" value="96">
+          </div>
+          <div class="source-options">
+            <label for="tab-lead">旋律提取</label>
+            <select id="tab-lead"><option value="lead">省略低音伴奏</option><option value="all">保留低音拨弦</option></select>
+          </div>
+          <p class="privacy">适用于标准调弦、带节奏符杆的印刷六线谱。变调夹、拍号和速度请按原谱填写。</p>
         </div>
         <div id="pdf-control" class="source-options" hidden>
           <label for="pdf-pages">PDF 页码</label>
@@ -196,7 +212,7 @@
               <label for="fingering-mode">指法模式</label>
               <select id="fingering-mode"><option value="simple">简易（默认）</option><option value="full">完整（允许组合）</option></select>
               <label for="arrangement-mode">编排方式</label>
-              <select id="arrangement-mode"><option value="standard">标准（默认）</option><option value="melody">保留旋律走向（测试）</option></select>
+              <select id="arrangement-mode"><option value="auto">自动（默认）</option><option value="standard">标准</option><option value="melody">保留旋律走向（测试）</option></select>
               <label for="transposition">整体移调</label>
               <select id="transposition"><option value="auto">自动选择</option><option value="0">原调</option></select>
               <label for="tempo">试听速度</label>

@@ -1,4 +1,4 @@
-import { arrange, baseFingers, chooseShift, controlSymbol, DEMO, fingering, FINGERING_MODES, formatMelody, KINDS, LAYOUTS, mergeTies, parseMelody, pitchName } from './music.mjs?v=10';
+import { arrange, baseFingers, chooseShift, controlSymbol, DEMO, fingering, FINGERING_MODES, formatMelody, KINDS, LAYOUTS, mergeTies, parseMelody, pitchName } from './music.mjs?v=11';
 import { previewVoice } from './ocarina-audio.mjs?v=1';
 import { scoreExport, scoreImages, tablatureText } from './score-export.mjs?v=7';
 import { fileKind, MAX_FILE_BYTES, openMusicXML, openPdf, parsePages, readImage, readMusicXML, readPdfPage } from './score-files.mjs?v=9';
@@ -111,7 +111,8 @@ function setPlaybackStart(index) {
 }
 
 function preservesMelody() {
-  return $('arrangement-mode').value === 'melody';
+  const mode = $('arrangement-mode').value;
+  return mode === 'melody' || (mode === 'auto' && score.kind === 'tab');
 }
 
 function automaticShift(fold = $('fold').checked) {
@@ -782,13 +783,15 @@ function renderSourceOptions() {
   $('audio-grid-control').hidden = gridControl;
   $('audio-timing').disabled = rhythmControl || Boolean(task);
   for (const id of ['audio-bpm', 'audio-meter']) $(id).disabled = gridControl || Boolean(task);
-  $('recognition-quality-control').hidden = !visual || !selected;
-  $('key-control').hidden = !visual || recognitionType.value === 'staff' ||
+  const tabFile = visual && recognitionType.value === 'tab';
+  $('tab-controls').hidden = !tabFile;
+  $('recognition-quality-control').hidden = !visual || !selected || tabFile;
+  $('key-control').hidden = !visual || recognitionType.value === 'staff' || tabFile ||
     (!selected && recognitionType.value !== 'numbered');
   $('jianpu-source-control').hidden = $('key-control').hidden;
   $('pdf-control').hidden = selected?.kind !== 'pdf';
   const parts = selected?.parts ?? [];
-  $('part-control').hidden = parts.length <= 1;
+  $('part-control').hidden = parts.length <= 1 || tabFile;
   const value = Math.min(Number(partSelect.value), parts.length - 1);
   partSelect.replaceChildren(...parts.map((name, index) => new Option(name, String(index))));
   partSelect.value = String(Math.max(0, value));
@@ -798,7 +801,8 @@ function renderSourceOptions() {
   $('convert-label').textContent = audioFile ? '提取旋律并转谱' : '识别并转谱';
   $('convert-button').disabled = !selected?.ready || Boolean(task);
   $('progress').hidden = !task;
-  for (const id of ['recognition-quality', 'audio-mode', 'jianpu-key', 'jianpu-source', 'source-part', 'pdf-pages', 'demo-button']) $(id).disabled = Boolean(task);
+  for (const id of ['recognition-quality', 'audio-mode', 'jianpu-key', 'jianpu-source', 'source-part', 'pdf-pages', 'demo-button',
+    'tab-capo', 'tab-meter', 'tab-tempo', 'tab-lead']) $(id).disabled = Boolean(task);
 }
 
 for (const id of ['audio-mode', 'audio-timing']) $(id).addEventListener('change', renderSourceOptions);
@@ -1051,7 +1055,12 @@ async function recognizeImages(run, source, part, type, key, pages) {
     previews.push(page ? await canvasPreview(canvas, page) : source.preview[0]);
     let recognized;
     let staffDetected = false;
-    if (type !== 'numbered') {
+    if (type === 'tab') {
+      progress(run, label + '正在读取六线谱品位与节奏…', base + weight * 0.45);
+      const { recognizeGuitarTab } = await raceAbort(import('./guitar-tab.mjs?v=1'), signal);
+      recognized = recognizeGuitarTab(canvas, run.tabOptions);
+      kinds.add('tab');
+    } else if (type !== 'numbered') {
       const result = await staffPage(run, canvas, part, { fifths, meter, staffTie }, label, base, weight);
       staffDetected = result.parts > 0;
       partCount = Math.max(partCount, result.parts);
@@ -1098,13 +1107,14 @@ async function recognizeImages(run, source, part, type, key, pages) {
     if (notes.length > MAX_NOTES) throw new Error('识别结果超过 1200 个音符，请分段转换。');
   }
   source.parts = partNames(partCount);
+  if (!notes.length && type === 'tab') throw new Error('未读到清晰的六线谱。请上传带节奏符杆的印刷谱，保留谱线、小节线及下方的连梁。');
   if (!notes.length) throw new Error(type === 'numbered' ? '未读到连续的简谱数字。请裁剪出清晰的主旋律，或改用手动输入。' :
     '未能读出可用旋律。请检查识谱方式与声部，或裁剪出清晰的单行主旋律。');
   if (unreadPages) notices.add(`所选页面中有 ${unreadPages} 页没有读到旋律。`);
   if (kinds.has('staff')) notices.add('五线谱识别适用于清晰的印刷谱，请检查音高与节奏。');
   return {
-    notes: run.enhanced ? notes : mergeTies(notes), original: previews, kind: kinds.has('staff') ? 'staff' : 'numbered',
-    notices: [...notices], meter: firstMeter, tempo, keepTies: run.enhanced,
+    notes: run.enhanced ? notes : mergeTies(notes), original: previews, kind: kinds.has('tab') ? 'tab' : kinds.has('staff') ? 'staff' : 'numbered',
+    notices: [...notices], meter: firstMeter, tempo: run.tabOptions?.tempo ?? tempo, keepTies: run.enhanced,
   };
 }
 
@@ -1165,11 +1175,20 @@ $('convert-button').addEventListener('click', async () => {
   const key = $('jianpu-key').value;
   const audioOptions = source.kind === 'audio' ? getAudioOptions() : undefined;
   if (audioOptions === null) return;
+  let tabOptions;
+  if ((source.kind === 'image' || source.kind === 'heic' || source.kind === 'pdf') && type === 'tab') {
+    const capo = $('tab-capo');
+    const tempo = $('tab-tempo');
+    if (!capo.reportValidity() || !tempo.reportValidity()) return;
+    const [num, den] = $('tab-meter').value.split('/').map(Number);
+    tabOptions = { capo: Number(capo.value), tempo: Number(tempo.value) || 96, meter: { num, den }, lead: $('tab-lead').value === 'lead' };
+  }
   const run = {
     controller: new AbortController(),
     preferMirror: $('jianpu-source').value === 'mirror',
-    enhanced: $('recognition-quality').value === 'enhanced',
+    enhanced: !tabOptions && $('recognition-quality').value === 'enhanced',
     audioOptions,
+    tabOptions,
   };
   task = run;
   try {
